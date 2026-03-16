@@ -1,0 +1,9 @@
+{
+  "name": "uftm-mobile-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Versão web do UFTM Mobile",
+  "scripts": {
+    "start": "node server.js"
+  }
+}

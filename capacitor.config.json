@@ -1,0 +1,6 @@
+{
+  "appId": "br.uftm.mobile",
+  "appName": "UFTM Mobile",
+  "webDir": ".",
+  "bundledWebRuntime": false
+}

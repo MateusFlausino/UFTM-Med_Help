@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="UFTM Mobile">
+  <defs>
+    <linearGradient id="bg" x1="0%" x2="100%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="#006837" />
+      <stop offset="100%" stop-color="#004e29" />
+    </linearGradient>
+  </defs>
+  <rect width="256" height="256" rx="56" fill="url(#bg)" />
+  <circle cx="128" cy="76" r="34" fill="#f9b233" opacity="0.95" />
+  <path
+    d="M61 121h34v70c0 5 2 8 7 8s7-3 7-8v-70h38v71c0 25-15 40-43 40s-43-15-43-40z"
+    fill="#f7f1de"
+  />
+  <path
+    d="M162 121h33l16 27 16-27h33l-33 52v44h-32v-44z"
+    fill="#f9b233"
+  />
+</svg>
