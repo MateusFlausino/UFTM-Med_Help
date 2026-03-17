@@ -40,6 +40,22 @@ module.exports = async function handler(request, response) {
 };
 
 function readRequestBody(request) {
+  if (Buffer.isBuffer(request?.body)) {
+    return Promise.resolve(request.body);
+  }
+
+  if (request?.body instanceof Uint8Array) {
+    return Promise.resolve(Buffer.from(request.body));
+  }
+
+  if (request?.body instanceof ArrayBuffer) {
+    return Promise.resolve(Buffer.from(request.body));
+  }
+
+  if (typeof request?.body === "string") {
+    return Promise.resolve(Buffer.from(request.body, "binary"));
+  }
+
   return new Promise((resolve, reject) => {
     const chunks = [];
 

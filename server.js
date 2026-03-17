@@ -19,6 +19,11 @@ const contentTypes = {
 };
 
 const server = http.createServer((request, response) => {
+  if ((request.url || "").startsWith("/api/dagv-content")) {
+    handleApiRoute("./api/dagv-content", request, response);
+    return;
+  }
+
   if ((request.url || "").startsWith("/api/parse-sca")) {
     handleApiRoute("./api/parse-sca", request, response);
     return;

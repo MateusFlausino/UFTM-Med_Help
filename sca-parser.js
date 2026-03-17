@@ -76,6 +76,7 @@ export async function extractScaPdfDataFromArrayBuffer(buffer, fallbackProfile =
 
 async function loadPdfJs() {
   if (!pdfjsModulePromise) {
+    ensurePdfJsCompatibility();
     pdfjsModulePromise = loadLocalPdfJs().catch((error) => {
       pdfjsModulePromise = null;
       throw new Error(`não consegui carregar o leitor de PDF necessário para importar este arquivo (${describeLoadError(error)})`);
@@ -99,6 +100,193 @@ async function loadLocalPdfJs() {
 function describeLoadError(error) {
   const message = String(error?.message || error || "").trim();
   return message || "erro desconhecido";
+}
+
+function ensurePdfJsCompatibility() {
+  if (typeof globalThis.DOMMatrix !== "function") {
+    globalThis.DOMMatrix = SimpleDOMMatrix;
+  }
+
+  if (typeof globalThis.DOMMatrixReadOnly !== "function") {
+    globalThis.DOMMatrixReadOnly = SimpleDOMMatrix;
+  }
+}
+
+class SimpleDOMMatrix {
+  static fromMatrix(init) {
+    return new SimpleDOMMatrix(init);
+  }
+
+  constructor(init) {
+    const values = normalizeMatrixInit(init);
+    this._set(values.a, values.b, values.c, values.d, values.e, values.f);
+  }
+
+  multiply(other) {
+    return new SimpleDOMMatrix(this).multiplySelf(other);
+  }
+
+  multiplySelf(other) {
+    const matrix = normalizeMatrixInit(other);
+    const next = multiply2d(this, matrix);
+    this._set(next.a, next.b, next.c, next.d, next.e, next.f);
+    return this;
+  }
+
+  preMultiply(other) {
+    return new SimpleDOMMatrix(this).preMultiplySelf(other);
+  }
+
+  preMultiplySelf(other) {
+    const matrix = normalizeMatrixInit(other);
+    const next = multiply2d(matrix, this);
+    this._set(next.a, next.b, next.c, next.d, next.e, next.f);
+    return this;
+  }
+
+  translate(tx = 0, ty = 0) {
+    return this.multiplySelf([1, 0, 0, 1, tx, ty]);
+  }
+
+  translateSelf(tx = 0, ty = 0) {
+    return this.translate(tx, ty);
+  }
+
+  scale(scaleX = 1, scaleY = scaleX, scaleZ = 1, originX = 0, originY = 0) {
+    if (originX || originY) {
+      this.translate(originX, originY);
+    }
+
+    this.multiplySelf([scaleX, 0, 0, scaleY, 0, 0]);
+
+    if (originX || originY) {
+      this.translate(-originX, -originY);
+    }
+
+    return this;
+  }
+
+  scaleSelf(scaleX = 1, scaleY = scaleX, scaleZ = 1, originX = 0, originY = 0) {
+    return this.scale(scaleX, scaleY, scaleZ, originX, originY);
+  }
+
+  inverse() {
+    return new SimpleDOMMatrix(this).invertSelf();
+  }
+
+  invertSelf() {
+    const determinant = this.a * this.d - this.b * this.c;
+    if (!determinant) {
+      this._set(NaN, NaN, NaN, NaN, NaN, NaN);
+      return this;
+    }
+
+    const next = {
+      a: this.d / determinant,
+      b: -this.b / determinant,
+      c: -this.c / determinant,
+      d: this.a / determinant,
+      e: (this.c * this.f - this.d * this.e) / determinant,
+      f: (this.b * this.e - this.a * this.f) / determinant,
+    };
+
+    this._set(next.a, next.b, next.c, next.d, next.e, next.f);
+    return this;
+  }
+
+  transformPoint(point = {}) {
+    const x = Number(point.x || 0);
+    const y = Number(point.y || 0);
+    const z = Number(point.z || 0);
+    const w = Number(point.w || 1);
+
+    return {
+      x: x * this.a + y * this.c + this.e,
+      y: x * this.b + y * this.d + this.f,
+      z,
+      w,
+    };
+  }
+
+  toFloat64Array() {
+    return new Float64Array([
+      this.m11, this.m12, this.m13, this.m14,
+      this.m21, this.m22, this.m23, this.m24,
+      this.m31, this.m32, this.m33, this.m34,
+      this.m41, this.m42, this.m43, this.m44,
+    ]);
+  }
+
+  _set(a, b, c, d, e, f) {
+    this.a = a;
+    this.b = b;
+    this.c = c;
+    this.d = d;
+    this.e = e;
+    this.f = f;
+    this.m11 = a;
+    this.m12 = b;
+    this.m13 = 0;
+    this.m14 = 0;
+    this.m21 = c;
+    this.m22 = d;
+    this.m23 = 0;
+    this.m24 = 0;
+    this.m31 = 0;
+    this.m32 = 0;
+    this.m33 = 1;
+    this.m34 = 0;
+    this.m41 = e;
+    this.m42 = f;
+    this.m43 = 0;
+    this.m44 = 1;
+    this.is2D = true;
+    this.isIdentity = a === 1 && b === 0 && c === 0 && d === 1 && e === 0 && f === 0;
+  }
+}
+
+function normalizeMatrixInit(init) {
+  if (init instanceof SimpleDOMMatrix) {
+    return init;
+  }
+
+  if (Array.isArray(init) || ArrayBuffer.isView(init)) {
+    const values = Array.from(init);
+    if (values.length >= 6) {
+      return {
+        a: Number(values[0] ?? 1),
+        b: Number(values[1] ?? 0),
+        c: Number(values[2] ?? 0),
+        d: Number(values[3] ?? 1),
+        e: Number(values[4] ?? 0),
+        f: Number(values[5] ?? 0),
+      };
+    }
+  }
+
+  if (init && typeof init === "object") {
+    return {
+      a: Number(init.a ?? init.m11 ?? 1),
+      b: Number(init.b ?? init.m12 ?? 0),
+      c: Number(init.c ?? init.m21 ?? 0),
+      d: Number(init.d ?? init.m22 ?? 1),
+      e: Number(init.e ?? init.m41 ?? 0),
+      f: Number(init.f ?? init.m42 ?? 0),
+    };
+  }
+
+  return { a: 1, b: 0, c: 0, d: 1, e: 0, f: 0 };
+}
+
+function multiply2d(left, right) {
+  return {
+    a: left.a * right.a + left.c * right.b,
+    b: left.b * right.a + left.d * right.b,
+    c: left.a * right.c + left.c * right.d,
+    d: left.b * right.c + left.d * right.d,
+    e: left.a * right.e + left.c * right.f + left.e,
+    f: left.b * right.e + left.d * right.f + left.f,
+  };
 }
 
 function toPdfBinary(buffer) {

@@ -3,7 +3,6 @@ import { extractScaPdfData } from "./sca-parser.js";
 const APP_NAME = "Agenda DAGV";
 const APP_MARK = "DAGV";
 const APP_TAGLINE = "Horários, RU e SCA no espaço do DA";
-const DA_PORTAL_URL = "https://dagvmeduftm.wordpress.com/festas/";
 
 const UI_STORAGE_KEY = "uftm-mobile-local-ui-v1";
 const SESSION_STORAGE_KEY = "uftm-mobile-local-session-v1";
@@ -20,7 +19,10 @@ const MAIN_NAV_ITEMS = [
   { id: "agenda", label: "Agenda Medicina" },
   { id: "info", label: "Informações" },
   { id: "links", label: "Links" },
+  { id: "academic", label: "Acadêmico" },
 ];
+
+const PORTAL_TABS = new Set(["home", "elections", "dagv", "coordination", "agenda", "info", "links"]);
 
 const AGENDA_NAV_ITEMS = [
   { id: "today", label: "Hoje" },
@@ -109,6 +111,10 @@ let state = {
   openingUploadId: "",
   draftName: uiState.draftName || "",
   draftEmail: uiState.draftEmail || "",
+  portalContent: {},
+  newsFeed: [],
+  portalLoadingTab: "",
+  portalError: "",
 };
 
 appElement.addEventListener("click", onClick);
@@ -130,6 +136,7 @@ async function init() {
     });
   }
 
+  loadPortalTab("home", true);
   refreshRuMenu(true);
 }
 
@@ -196,7 +203,7 @@ function render() {
               <span>${escape(state.user.email || state.user.uid)}</span>
             </div>
           </div>
-          <a class="ghost link-button" href="${escapeAttribute(DA_PORTAL_URL)}" target="_blank" rel="noreferrer">Portal do DA</a>
+          <button class="ghost" data-action="set-main-tab" data-tab="home">Início</button>
           <button class="ghost" data-action="sync-ru">Atualizar RU</button>
           <button class="ghost" data-action="logout">Trocar aluno</button>
         </div>
@@ -206,7 +213,7 @@ function render() {
         <div class="hero-content">
           <div class="hero-topline">Aplicativo do diretório acadêmico</div>
           <div class="hero-band">
-            <span class="hero-chip">ID local ${escape(shortUid(state.user.uid))}</span>
+            <span class="hero-chip">Perfil ${escape(shortUid(state.user.uid))}</span>
             <span class="hero-chip">${escape(academicData?.profile?.course || "Curso não identificado")}</span>
             <span class="hero-chip">${activeUpload ? "PDF importado" : "Envie o PDF do SCA"}</span>
           </div>
@@ -220,7 +227,7 @@ function render() {
               <input id="referenceDate" type="date" value="${escape(state.referenceDate)}" />
             </div>
             <div class="button-row">
-              <button class="secondary" data-action="open-agenda-tab" data-tab="${academicData ? "today" : "sca"}">${academicData ? "Ver agenda" : "Importar PDF"}</button>
+              <button class="secondary" data-action="open-academic-tab" data-tab="${academicData ? "today" : "sca"}">${academicData ? "Ver agenda" : "Importar PDF"}</button>
               <button class="ghost" data-action="set-main-tab" data-tab="dagv">Explorar o DAGV</button>
             </div>
           </div>
@@ -302,178 +309,140 @@ function renderLogin() {
 }
 
 function renderMainPanel(activeUpload) {
+  if (state.activeTab === "academic") {
+    return renderAcademicPanel(activeUpload);
+  }
+
+  return renderPortalTab(activeUpload);
+}
+
+function renderPortalTab(activeUpload) {
   const academicData = getAcademicData(activeUpload);
   const schedule = academicData?.schedule || [];
   const disciplines = academicData?.disciplines || [];
   const todayClasses = getClassesForDate(schedule, state.referenceDate);
   const nextClass = findNextClass(schedule, state.referenceDate);
   const menu = state.menu[0] || null;
-
-  if (state.activeTab === "elections") {
-    return `
-      <section class="section-stack">
-        <article class="paper-card feature-card">
-          <div class="section-topline">Eleições DAGV</div>
-          <h2 class="section-title">Acompanhe as eleições do diretório com acesso rápido.</h2>
-          <p class="section-copy">
-            Esta aba replica a navegação do portal do DAGV e deixa o acesso às páginas institucionais mais próximo do aluno, em um layout pensado para celular.
-          </p>
-          <div class="button-row" style="margin-top: 1rem;">
-            <a class="cta link-button" href="https://dagvmeduftm.wordpress.com/eleicoes-dagv/" target="_blank" rel="noreferrer">Abrir eleições</a>
-            <a class="ghost link-button" href="https://dagvmeduftm.wordpress.com/" target="_blank" rel="noreferrer">Portal completo</a>
-          </div>
-        </article>
-        <section class="link-grid">
-          ${DAGV_LINKS.slice(0, 3).map(renderLinkCard).join("")}
-        </section>
-      </section>
-    `;
-  }
-
-  if (state.activeTab === "dagv") {
-    return `
-      <section class="section-stack">
-        <article class="paper-card">
-          <div class="section-topline">DAGV</div>
-          <h2 class="section-title">As abas do diretório agora vivem dentro do aplicativo.</h2>
-          <p class="section-copy">
-            O visual foi simplificado para uso móvel, mas a organização segue a referência do WordPress do DAGV para o aluno encontrar as mesmas áreas com menos atrito.
-          </p>
-        </article>
-        <section class="link-grid">
-          ${DAGV_LINKS.map(renderLinkCard).join("")}
-        </section>
-      </section>
-    `;
-  }
-
-  if (state.activeTab === "coordination") {
-    return `
-      <section class="section-stack">
-        <article class="paper-card">
-          <div class="section-topline">Coordenação</div>
-          <h2 class="section-title">Coordenações e frentes do DAGV em acesso direto.</h2>
-          <p class="section-copy">
-            Cada cartão leva para uma área do portal original, mantendo a mesma lógica de navegação do WordPress em uma grade confortável para celular.
-          </p>
-        </article>
-        <section class="link-grid">
-          ${COORDINATION_LINKS.map(renderLinkCard).join("")}
-        </section>
-      </section>
-    `;
-  }
-
-  if (state.activeTab === "agenda") {
-    return renderAgendaPanel(activeUpload);
-  }
-
-  if (state.activeTab === "info") {
-    return `
-      <section class="section-stack">
-        <article class="paper-card">
-          <div class="section-topline">Informações</div>
-          <h2 class="section-title">Links úteis do curso, da universidade e do movimento estudantil.</h2>
-          <p class="section-copy">
-            Esta área reúne as páginas informativas do WordPress e os atalhos extras do DAGV em um formato mais limpo, sem perder o conteúdo original.
-          </p>
-        </article>
-        <section class="link-grid">
-          ${INFO_LINKS.map(renderLinkCard).join("")}
-        </section>
-      </section>
-    `;
-  }
-
-  if (state.activeTab === "links") {
-    return `
-      <section class="section-stack">
-        <article class="paper-card">
-          <div class="section-topline">Links</div>
-          <h2 class="section-title">Acessos rápidos do portal do DAGV.</h2>
-          <p class="section-copy">
-            Esta aba replica os atalhos do WordPress em um formato de cartões grandes, com leitura simples e toque confortável no celular.
-          </p>
-        </article>
-        <section class="link-grid">
-          ${LINKS_TAB_ITEMS.map(renderLinkCard).join("")}
-        </section>
-      </section>
-    `;
-  }
+  const tabContent = state.portalContent[state.activeTab];
+  const pages = tabContent?.pages || [];
+  const titleMap = {
+    home: "Página inicial",
+    elections: "Eleições DAGV",
+    dagv: "DAGV",
+    coordination: "Coordenação",
+    agenda: "Agenda Medicina",
+    info: "Informações",
+    links: "Links",
+  };
+  const descriptionMap = {
+    home: "Página inicial do diretório com visão geral, notícias e destaques do dia.",
+    elections: "Os gestores atualizam esta área no portal do DAGV e o aplicativo acompanha as mudanças.",
+    dagv: "Conteúdo institucional do DAGV incorporado no aplicativo, sem redirecionar o aluno.",
+    coordination: "Páginas das coordenações carregadas no app para consulta móvel.",
+    agenda: "Eventos acadêmicos e festas mostrados dentro da experiência do aplicativo.",
+    info: "Informações úteis do curso e da universidade incorporadas ao app.",
+    links: "Projetos e acessos do DAGV reunidos em leitura nativa.",
+  };
 
   return `
     <section class="section-stack">
-      <section class="overview-grid">
-        <article class="paper-card compact-card">
-          <div class="section-topline">Resumo do dia</div>
-          <h2 class="section-title">${escape(formatLongDate(state.referenceDate))}</h2>
-          <p class="section-copy">
-            ${todayClasses.length
-              ? `Você tem ${todayClasses.length} bloco${todayClasses.length > 1 ? "s" : ""} nesta data.`
-              : "Ainda não há aulas nesta data ou o PDF ainda não foi enviado."}
-          </p>
-          <div class="toast ${nextClass ? "" : "is-warning"}" style="margin-top: 1rem;">
-            ${nextClass
-              ? `Próxima aula: ${escape(nextClass.title)} em ${escape(nextClass.day)} às ${escape(nextClass.startTime)}.`
-              : "Sem próxima aula encontrada no período visível."}
-          </div>
-          <div class="button-row" style="margin-top: 1rem;">
-            <button class="secondary" data-action="open-agenda-tab" data-tab="${academicData ? "today" : "sca"}">${academicData ? "Abrir agenda" : "Enviar PDF"}</button>
-          </div>
-        </article>
+      ${state.activeTab === "home" ? `
+        <section class="overview-grid">
+          <article class="paper-card compact-card">
+            <div class="section-topline">Resumo do dia</div>
+            <h2 class="section-title">${escape(formatLongDate(state.referenceDate))}</h2>
+            <p class="section-copy">
+              ${todayClasses.length
+                ? `Você tem ${todayClasses.length} bloco${todayClasses.length > 1 ? "s" : ""} nesta data.`
+                : "Ainda não há aulas nesta data ou o PDF ainda não foi enviado."}
+            </p>
+            <div class="toast ${nextClass ? "" : "is-warning"}" style="margin-top: 1rem;">
+              ${nextClass
+                ? `Próxima aula: ${escape(nextClass.title)} em ${escape(nextClass.day)} às ${escape(nextClass.startTime)}.`
+                : "Sem próxima aula encontrada no período visível."}
+            </div>
+            <div class="button-row" style="margin-top: 1rem;">
+              <button class="secondary" data-action="open-academic-tab" data-tab="${academicData ? "today" : "sca"}">${academicData ? "Abrir agenda" : "Enviar PDF"}</button>
+            </div>
+          </article>
 
-        <article class="paper-card compact-card">
-          <div class="section-topline">RU Abadia</div>
-          <h2 class="section-title">${escape(menu?.mainDish || "Cardápio ainda indisponível")}</h2>
-          <p class="section-copy">${escape(menu ? `${menu.day} • ${formatDateShort(menu.date)}` : "Sem atualização disponível no momento.")}</p>
-          <div class="mini-stack" style="margin-top: 1rem;">
-            <div class="mini-card"><small>Opção</small><strong>${escape(menu?.option || "aguardando")}</strong><span>alternativa do dia</span></div>
-            <div class="mini-card"><small>Sobremesa</small><strong>${escape(menu?.dessert || "aguardando")}</strong><span>extra do RU</span></div>
-          </div>
-          <div class="button-row" style="margin-top: 1rem;">
-            <button class="ghost" data-action="open-agenda-tab" data-tab="menu">Abrir RU</button>
-          </div>
-        </article>
+          <article class="paper-card compact-card">
+            <div class="section-topline">RU Abadia</div>
+            <h2 class="section-title">${escape(menu?.mainDish || "Cardápio ainda indisponível")}</h2>
+            <p class="section-copy">${escape(menu ? `${menu.day} • ${formatDateShort(menu.date)}` : "Sem atualização disponível no momento.")}</p>
+            <div class="mini-stack" style="margin-top: 1rem;">
+              <div class="mini-card"><small>Opção</small><strong>${escape(menu?.option || "aguardando")}</strong><span>alternativa do dia</span></div>
+              <div class="mini-card"><small>Sobremesa</small><strong>${escape(menu?.dessert || "aguardando")}</strong><span>extra do RU</span></div>
+            </div>
+            <div class="button-row" style="margin-top: 1rem;">
+              <button class="ghost" data-action="open-academic-tab" data-tab="menu">Abrir RU</button>
+            </div>
+          </article>
+        </section>
+
+        <section class="shortcut-grid">
+          ${renderShortcutCard("Eleições DAGV", "Chamadas e atualizações do diretório", "set-main-tab", "elections")}
+          ${renderShortcutCard("DAGV", "História, estatuto e galeria", "set-main-tab", "dagv")}
+          ${renderShortcutCard("Coordenação", "Gestão e frentes ativas", "set-main-tab", "coordination")}
+          ${renderShortcutCard("Agenda Medicina", "Eventos e festas do curso", "set-main-tab", "agenda")}
+          ${renderShortcutCard("Informações", "Recados e apoios institucionais", "set-main-tab", "info")}
+          ${renderShortcutCard("Links", "Projetos e acessos rápidos", "set-main-tab", "links")}
+          ${renderShortcutCard("Acadêmico", "Hoje, semana, RU e SCA", "set-main-tab", "academic")}
+        </section>
+      ` : ""}
+
+      <section class="paper-card agenda-shell">
+        <div class="section-topline">${escape(titleMap[state.activeTab] || "Portal DAGV")}</div>
+        <h2 class="section-title">${escape(titleMap[state.activeTab] || "Portal DAGV")}</h2>
+        <p class="section-copy">${escape(descriptionMap[state.activeTab] || "Conteúdo do DAGV carregado dentro do aplicativo.")}</p>
+        <div class="button-row" style="margin-top: 1rem;">
+          <button class="ghost" data-action="refresh-portal-tab" data-tab="${escapeAttribute(state.activeTab)}">${state.portalLoadingTab === state.activeTab ? "Atualizando..." : "Atualizar conteúdo"}</button>
+          ${state.activeTab === "home" ? `<button class="ghost" data-action="set-main-tab" data-tab="academic">Abrir área acadêmica</button>` : ""}
+        </div>
+        ${state.portalError && state.portalLoadingTab !== state.activeTab ? `<div class="toast is-warning" style="margin-top: 1rem;">${escape(state.portalError)}</div>` : ""}
       </section>
 
-      <section class="shortcut-grid">
-        ${renderShortcutCard("Página inicial", "Resumo com agenda, RU e atalhos", "set-main-tab", "home")}
-        ${renderShortcutCard("Eleições DAGV", "Acompanhe comunicados oficiais", "set-main-tab", "elections")}
-        ${renderShortcutCard("DAGV", "História, estatuto e galeria", "set-main-tab", "dagv")}
-        ${renderShortcutCard("Coordenação", "Acesse as coordenações do diretório", "set-main-tab", "coordination")}
-        ${renderShortcutCard("Agenda Medicina", "Hoje, semana, RU e SCA", "set-main-tab", "agenda")}
-        ${renderShortcutCard("Informações", "Links úteis do WordPress", "set-main-tab", "info")}
-        ${renderShortcutCard("Links", "Atalhos rápidos do portal", "set-main-tab", "links")}
-      </section>
+      ${state.newsFeed.length ? `
+        <section class="section-stack">
+          <div class="section-topline">News do dia</div>
+          <div class="link-grid">
+            ${state.newsFeed.slice(0, 4).map(renderNewsCard).join("")}
+          </div>
+        </section>
+      ` : ""}
 
-      <section class="panel-grid">
-        <article class="paper-card">
-          <div class="section-topline">Prévia da agenda</div>
-          <h2 class="section-title">${escape(academicData?.profile?.studentName || state.user.displayName || "Aluno")}</h2>
-          <div class="mini-grid" style="margin-top: 1rem;">
-            <div class="mini-card"><small>PDF ativo</small><strong>${activeUpload ? "Selecionado" : "Pendente"}</strong><span>${escape(activeUpload ? activeUpload.originalName : "envie o PDF do SCA")}</span></div>
-            <div class="mini-card"><small>Disciplinas</small><strong>${String(disciplines.length)}</strong><span>${escape(academicData?.profile?.course || "curso não identificado")}</span></div>
-            <div class="mini-card"><small>Próxima</small><strong>${escape(nextClass?.startTime || "--:--")}</strong><span>${escape(nextClass?.title || "sem aula futura")}</span></div>
-            <div class="mini-card"><small>Sincronização RU</small><strong>${escape(formatShortDateTime(state.lastMenuSync))}</strong><span>${escape(state.syncMessage)}</span></div>
-          </div>
-        </article>
-        <article class="paper-card">
-          <div class="section-topline">Portal do DAGV</div>
-          <h2 class="section-title">As mesmas áreas do WordPress, com leitura mais leve no celular.</h2>
-          <p class="section-copy">
-            A navegação principal foi redesenhada para toque, rolagem curta e leitura rápida, mantendo o diretório como centro da experiência.
-          </p>
-          <div class="link-list" style="margin-top: 1rem;">
-            ${DAGV_LINKS.slice(0, 4).map(renderInlineLink).join("")}
-          </div>
-        </article>
-      </section>
+      ${state.portalLoadingTab === state.activeTab && !pages.length
+        ? `<div class="empty-state">Carregando o conteúdo atualizado do DAGV...</div>`
+        : pages.length
+          ? `<section class="section-stack">${pages.map(renderPortalPage).join("")}</section>`
+          : `<div class="empty-state">Ainda não consegui carregar o conteúdo desta aba. Toque em atualizar para tentar novamente.</div>`}
+
+      ${state.activeTab === "home" ? `
+        <section class="panel-grid">
+          <article class="paper-card">
+            <div class="section-topline">Prévia acadêmica</div>
+            <h2 class="section-title">${escape(academicData?.profile?.studentName || state.user.displayName || "Aluno")}</h2>
+            <div class="mini-grid" style="margin-top: 1rem;">
+              <div class="mini-card"><small>PDF ativo</small><strong>${activeUpload ? "Selecionado" : "Pendente"}</strong><span>${escape(activeUpload ? activeUpload.originalName : "envie o PDF do SCA")}</span></div>
+              <div class="mini-card"><small>Disciplinas</small><strong>${String(disciplines.length)}</strong><span>${escape(academicData?.profile?.course || "curso não identificado")}</span></div>
+              <div class="mini-card"><small>Próxima</small><strong>${escape(nextClass?.startTime || "--:--")}</strong><span>${escape(nextClass?.title || "sem aula futura")}</span></div>
+              <div class="mini-card"><small>Sincronização RU</small><strong>${escape(formatShortDateTime(state.lastMenuSync))}</strong><span>${escape(state.syncMessage)}</span></div>
+            </div>
+          </article>
+          <article class="paper-card">
+            <div class="section-topline">Gestão de conteúdo</div>
+            <h2 class="section-title">Os gestores atualizam no portal do DAGV, e o app acompanha.</h2>
+            <p class="section-copy">
+              O aplicativo agora incorpora páginas e notícias do portal do DAGV sem tirar o aluno da experiência móvel.
+            </p>
+          </article>
+        </section>
+      ` : ""}
     </section>
   `;
 }
 
-function renderAgendaPanel(activeUpload) {
+function renderAcademicPanel(activeUpload) {
   const academicData = getAcademicData(activeUpload);
   const schedule = academicData?.schedule || [];
   const disciplines = academicData?.disciplines || [];
@@ -488,7 +457,7 @@ function renderAgendaPanel(activeUpload) {
 
     return `
       <section class="section-stack">
-        ${renderAgendaHeader("Semana acadêmica", "Abas da Agenda Medicina inspiradas no portal do DAGV.")}
+        ${renderAgendaHeader("Semana acadêmica", "Sua visão acadêmica semanal dentro do aplicativo.")}
         <section class="paper-card">
           <div class="section-topline">Semana acadêmica</div>
           <h2 class="section-title">${escape(weekTitle(state.referenceDate))}</h2>
@@ -508,7 +477,7 @@ function renderAgendaPanel(activeUpload) {
   if (state.agendaTab === "menu") {
     return `
       <section class="section-stack">
-        ${renderAgendaHeader("RU", "Acesso rápido ao cardápio diário dentro da Agenda Medicina.")}
+        ${renderAgendaHeader("RU", "Acesso rápido ao cardápio diário dentro da área acadêmica.")}
         <section class="panel-grid">
           <article class="paper-card">
             <div class="section-topline">Cardápio RU</div>
@@ -525,8 +494,8 @@ function renderAgendaPanel(activeUpload) {
             <h2 class="section-title">Atualização diária do RU da Abadia</h2>
             <div class="mini-stack" style="margin-top: 1rem;">
               <div class="mini-card"><small>Última publicação oficial</small><strong>${escape(formatShortDateTime(state.menu[0]?.updatedAt))}</strong><span>arquivo da Abadia</span></div>
-              <div class="mini-card"><small>Última verificação</small><strong>${escape(formatShortDateTime(state.lastMenuSync))}</strong><span>salva localmente</span></div>
-              <div class="mini-card"><small>Status</small><strong>${escape(state.syncMessage)}</strong><span>rota /api/ru-abadia</span></div>
+              <div class="mini-card"><small>Última verificação</small><strong>${escape(formatShortDateTime(state.lastMenuSync))}</strong><span>atualização do aparelho</span></div>
+              <div class="mini-card"><small>Status</small><strong>${escape(state.syncMessage)}</strong><span>fonte oficial do RU</span></div>
             </div>
           </aside>
         </section>
@@ -537,7 +506,7 @@ function renderAgendaPanel(activeUpload) {
   if (state.agendaTab === "sca") {
     return `
       <section class="section-stack">
-        ${renderAgendaHeader("SCA", "Importe e revise o PDF do aluno dentro da área Agenda Medicina.")}
+        ${renderAgendaHeader("SCA", "Importe e revise o PDF do aluno dentro da área acadêmica.")}
         <section class="upload-grid">
           <article class="upload-card">
             <div class="section-topline">Upload SCA</div>
@@ -613,7 +582,7 @@ function renderAgendaPanel(activeUpload) {
 
   return `
     <section class="section-stack">
-      ${renderAgendaHeader("Hoje", "Visualização diária dentro da Agenda Medicina.")}
+      ${renderAgendaHeader("Hoje", "Visualização diária do aluno dentro do aplicativo.")}
       <section class="panel-grid">
         <article class="timeline-card">
           <div class="timeline-topline">Hoje</div>
@@ -650,7 +619,7 @@ function renderAgendaPanel(activeUpload) {
 function renderAgendaHeader(title, description) {
   return `
     <section class="paper-card agenda-shell">
-      <div class="section-topline">Agenda Medicina</div>
+      <div class="section-topline">Acadêmico</div>
       <h2 class="section-title">${escape(title)}</h2>
       <p class="section-copy">${escape(description)}</p>
       <div class="segmented-control" style="margin-top: 1rem;">
@@ -739,6 +708,48 @@ function renderAgendaTabButton(item) {
   `;
 }
 
+function renderPortalPage(page) {
+  return `
+    <article class="paper-card portal-page">
+      <div class="portal-page-head">
+        <div>
+          <div class="section-topline">${escape(page.sourceLabel || "DAGV")}</div>
+          <h3 class="section-title">${escape(page.title || "Página")}</h3>
+        </div>
+        ${page.publishedAt ? `<span class="tag">${escape(formatShortDateTime(page.publishedAt))}</span>` : ""}
+      </div>
+      ${page.image ? `<img class="portal-image" src="${escapeAttribute(page.image)}" alt="${escapeAttribute(page.title || "Imagem da página")}" />` : ""}
+      ${page.summary ? `<p class="section-copy">${escape(page.summary)}</p>` : ""}
+      <div class="portal-blocks">
+        ${(page.blocks || []).map(renderPortalBlock).join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderPortalBlock(block) {
+  if (block.type === "heading") {
+    return `<h4 class="portal-heading">${escape(block.text)}</h4>`;
+  }
+
+  if (block.type === "list") {
+    return `<div class="portal-list-item">${escape(block.text)}</div>`;
+  }
+
+  return `<p class="portal-paragraph">${escape(block.text)}</p>`;
+}
+
+function renderNewsCard(item) {
+  return `
+    <article class="paper-card news-card">
+      <div class="section-topline">${escape(item.sourceLabel || "Atualização")}</div>
+      <h3 class="schedule-title">${escape(item.title || "Notícia")}</h3>
+      <p class="section-copy">${escape(item.summary || "Sem resumo disponível.")}</p>
+      <div class="support-line">${escape(item.publishedAt ? formatShortDateTime(item.publishedAt) : "sem data")}</div>
+    </article>
+  `;
+}
+
 function renderLinkCard(item) {
   return `
     <a class="paper-card link-card" href="${escapeAttribute(item.href)}" target="_blank" rel="noreferrer">
@@ -786,23 +797,32 @@ async function onClick(event) {
   const action = button.dataset.action;
 
   if (action === "set-main-tab") {
-    setState({ activeTab: button.dataset.tab || "home" });
+    const nextTab = button.dataset.tab || "home";
+    setState({ activeTab: nextTab });
+    if (PORTAL_TABS.has(nextTab)) {
+      loadPortalTab(nextTab, true);
+    }
     return;
   }
 
   if (action === "set-agenda-tab") {
     setState({
-      activeTab: "agenda",
+      activeTab: "academic",
       agendaTab: button.dataset.tab || "today",
     });
     return;
   }
 
-  if (action === "open-agenda-tab") {
+  if (action === "open-academic-tab") {
     setState({
-      activeTab: "agenda",
+      activeTab: "academic",
       agendaTab: button.dataset.tab || "today",
     });
+    return;
+  }
+
+  if (action === "refresh-portal-tab") {
+    loadPortalTab(button.dataset.tab || state.activeTab, false);
     return;
   }
 
@@ -904,7 +924,7 @@ async function loginLocal() {
       uploadMessage: uploads.length
         ? "Perfil reencontrado neste aparelho."
         : "Perfil criado. Agora envie o PDF oficial do SCA.",
-      activeTab: uploads.length ? state.activeTab : "agenda",
+      activeTab: uploads.length ? state.activeTab : "academic",
       agendaTab: uploads.length ? state.agendaTab : "sca",
     });
   } catch (error) {
@@ -969,7 +989,7 @@ async function uploadPdf(file, inputElement) {
     uploadError: "",
     uploadMessage: `Lendo ${file.name}...`,
     uploadProgress: 8,
-    activeTab: "agenda",
+    activeTab: "academic",
     agendaTab: "sca",
   });
 
@@ -1076,6 +1096,44 @@ async function parseAcademicPdfWithApi(file, fallbackProfile) {
   }
 
   return result.academicData;
+}
+
+async function loadPortalTab(tab, silent = false) {
+  if (!PORTAL_TABS.has(tab)) {
+    return;
+  }
+
+  setState({
+    portalLoadingTab: tab,
+    portalError: "",
+  }, { render: !silent });
+
+  try {
+    const response = await fetch(`/api/dagv-content?tab=${encodeURIComponent(tab)}`);
+    const result = await response.json().catch(() => null);
+
+    if (!response.ok || !result?.success) {
+      throw new Error(result?.message || `falha ao carregar o conteúdo do DAGV (${response.status})`);
+    }
+
+    setState({
+      portalLoadingTab: "",
+      portalError: "",
+      portalContent: {
+        ...state.portalContent,
+        [tab]: {
+          pages: Array.isArray(result.pages) ? result.pages : [],
+          generatedAt: result.generatedAt || "",
+        },
+      },
+      newsFeed: Array.isArray(result.news) ? result.news : state.newsFeed,
+    });
+  } catch (error) {
+    setState({
+      portalLoadingTab: "",
+      portalError: `Não consegui atualizar esta aba agora: ${describeLocalError(error)}`,
+    }, { render: !silent });
+  }
 }
 
 function setActiveUpload(uploadId) {
@@ -1233,7 +1291,7 @@ function renderMissingPdfState(message) {
     <div class="empty-state">
       ${escape(message)}
       <div class="button-row" style="margin-top: 0.75rem;">
-        <button class="ghost" data-action="open-agenda-tab" data-tab="sca">Abrir SCA</button>
+        <button class="ghost" data-action="open-academic-tab" data-tab="sca">Abrir SCA</button>
       </div>
     </div>
   `;
