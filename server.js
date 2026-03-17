@@ -1,7 +1,6 @@
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const { getTodayAbadiaMenu } = require("./ru-abadia");
 
 const port = Number(process.env.PORT || 4173);
 const root = process.cwd();
@@ -20,8 +19,13 @@ const contentTypes = {
 };
 
 const server = http.createServer((request, response) => {
+  if ((request.url || "").startsWith("/api/parse-sca")) {
+    handleApiRoute("./api/parse-sca", request, response);
+    return;
+  }
+
   if ((request.url || "").startsWith("/api/ru-abadia")) {
-    handleRuAbadia(response);
+    handleApiRoute("./api/ru-abadia", request, response);
     return;
   }
 
@@ -45,14 +49,10 @@ const server = http.createServer((request, response) => {
   });
 });
 
-async function handleRuAbadia(response) {
+async function handleApiRoute(modulePath, request, response) {
   try {
-    const menu = await getTodayAbadiaMenu();
-    response.writeHead(200, {
-      "Content-Type": "application/json; charset=utf-8",
-      "Cache-Control": "no-store",
-    });
-    response.end(JSON.stringify({ success: true, menu }));
+    const handler = require(modulePath);
+    await handler(request, response);
   } catch (error) {
     response.writeHead(500, {
       "Content-Type": "application/json; charset=utf-8",
@@ -63,5 +63,5 @@ async function handleRuAbadia(response) {
 }
 
 server.listen(port, () => {
-  console.log(`UFTM Mobile Web disponível em http://localhost:${port}`);
+  console.log(`Agenda DAGV disponível em http://localhost:${port}`);
 });

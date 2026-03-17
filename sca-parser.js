@@ -19,11 +19,15 @@ const PDFJS_IMPORT_CANDIDATES = [
 ];
 let pdfjsModulePromise = null;
 
-export async function extractScaPdfData(file, fallbackProfile = {}) {
-  const pdfjsLib = await loadPdfJs();
+export async function extractScaPdfData(file, fallbackProfile = {}, options = {}) {
   const buffer = await file.arrayBuffer();
+  return extractScaPdfDataFromArrayBuffer(buffer, fallbackProfile, options);
+}
+
+export async function extractScaPdfDataFromArrayBuffer(buffer, fallbackProfile = {}, options = {}) {
+  const pdfjsLib = options.pdfjsLib || await loadPdfJs();
   const loadingTask = pdfjsLib.getDocument({
-    data: buffer,
+    data: toPdfBinary(buffer),
     disableWorker: true,
     useSystemFonts: true,
   });
@@ -72,9 +76,9 @@ export async function extractScaPdfData(file, fallbackProfile = {}) {
 
 async function loadPdfJs() {
   if (!pdfjsModulePromise) {
-    pdfjsModulePromise = loadLocalPdfJs().catch(() => {
+    pdfjsModulePromise = loadLocalPdfJs().catch((error) => {
       pdfjsModulePromise = null;
-      throw new Error("não consegui carregar o leitor de PDF necessário para importar este arquivo");
+      throw new Error(`não consegui carregar o leitor de PDF necessário para importar este arquivo (${describeLoadError(error)})`);
     });
   }
   return pdfjsModulePromise;
@@ -90,6 +94,23 @@ async function loadLocalPdfJs() {
   }
 
   throw new Error("pdf.js indisponível");
+}
+
+function describeLoadError(error) {
+  const message = String(error?.message || error || "").trim();
+  return message || "erro desconhecido";
+}
+
+function toPdfBinary(buffer) {
+  if (buffer instanceof Uint8Array) {
+    return new Uint8Array(buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength));
+  }
+
+  if (buffer instanceof ArrayBuffer) {
+    return new Uint8Array(buffer);
+  }
+
+  return new Uint8Array(buffer || []);
 }
 
 function groupItemsIntoLines(items) {
