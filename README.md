@@ -15,14 +15,15 @@ Versão web do UFTM Mobile voltada aos estudantes de Medicina da UFTM, agora pre
 1. O aluno abre o app e informa nome e e-mail.
 2. O perfil é salvo localmente neste navegador.
 3. O PDF oficial do SCA é armazenado no próprio aparelho.
-4. O arquivo pode ser aberto novamente e marcado como PDF ativo.
-5. As abas `Hoje` e `Grade` ficam prontas para receber o parser real depois.
+4. O app extrai dados do aluno, disciplinas e horários do PDF.
+5. O arquivo pode ser aberto novamente e marcado como PDF ativo.
+6. As abas `Hoje` e `Grade` mostram a agenda acadêmica importada.
 
 ## Limitações desta alternativa
 
 - os dados não sincronizam entre aparelhos;
 - se o aluno limpar os dados do navegador, precisará reenviar o PDF;
-- o parser do PDF ainda não foi ligado nesta etapa.
+- o reconhecimento depende do PDF oficial do SCA em formato textual.
 
 ## Estrutura principal
 
@@ -54,9 +55,8 @@ O projeto continua compatível com deploy simples na Vercel.
 
 ## Próximo passo natural
 
-O próximo avanço técnico é ligar o parser real do PDF ativo para preencher:
+Os próximos avanços técnicos mais úteis agora são:
 
-- aba `Hoje`;
-- aba `Grade`;
-- lista de disciplinas;
-- salas, docentes e vigências.
+- adicionar cobrança e autenticação online;
+- sincronizar os PDFs entre aparelhos;
+- ampliar a leitura para novos formatos de relatório acadêmico.

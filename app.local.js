@@ -1,3 +1,5 @@
+import { extractScaPdfData } from "./sca-parser.js";
+
 const UI_STORAGE_KEY = "uftm-mobile-local-ui-v1";
 const SESSION_STORAGE_KEY = "uftm-mobile-local-session-v1";
 const PROFILE_STORAGE_PREFIX = "uftm-mobile-local-profile-";
@@ -108,8 +110,12 @@ function render() {
   }
 
   const activeUpload = getActiveUpload();
+  const academicData = getAcademicData(activeUpload);
+  const todayClasses = getClassesForDate(academicData?.schedule || [], state.referenceDate);
+  const nextClass = findNextClass(academicData?.schedule || [], state.referenceDate);
   const totalUploads = state.uploads.length;
-  const parserStatus = getParserStatusLabel(activeUpload);
+  const disciplineCount = academicData?.disciplines?.length || 0;
+  const classCount = academicData?.schedule?.length || 0;
 
   appElement.innerHTML = `
     <div class="app-view">
@@ -140,15 +146,15 @@ function render() {
 
       <section class="hero-card">
         <div class="hero-content">
-          <div class="hero-topline">Modo local sem Firebase</div>
+          <div class="hero-topline">Agenda acadêmica do aluno</div>
           <div class="hero-band">
             <span class="hero-chip">ID local ${escape(shortUid(state.user.uid))}</span>
-            <span class="hero-chip">${escape(formatLongDate(state.referenceDate))}</span>
-            <span class="hero-chip">${activeUpload ? "PDF ativo" : "Sem PDF ativo"}</span>
+            <span class="hero-chip">${escape(academicData?.profile?.course || "Curso não identificado")}</span>
+            <span class="hero-chip">${activeUpload ? "PDF importado" : "Envie o PDF do SCA"}</span>
           </div>
-          <h2 class="hero-title">${escape(buildHeroTitle(activeUpload))}</h2>
+          <h2 class="hero-title">${escape(buildHeroTitle(activeUpload, academicData, todayClasses, nextClass))}</h2>
           <p class="hero-subtitle">
-            Esta alternativa não usa Firebase nem serviço pago. Cada aluno mantém o próprio PDF neste navegador/aparelho e pode continuar depois sem reenviar, desde que não limpe os dados locais.
+            ${escape(buildHeroSubtitle(academicData))}
           </p>
           <div class="hero-actions">
             <div class="inline-field">
@@ -156,15 +162,15 @@ function render() {
               <input id="referenceDate" type="date" value="${escape(state.referenceDate)}" />
             </div>
             <div class="button-row">
-              <button class="secondary" data-action="set-tab" data-tab="sca">Abrir SCA</button>
-              <button class="ghost" data-action="sync-ru">Atualizar cardápio</button>
+              <button class="secondary" data-action="set-tab" data-tab="${academicData ? "today" : "sca"}">${academicData ? "Ver agenda" : "Importar PDF"}</button>
+              <button class="ghost" data-action="set-tab" data-tab="sca">Abrir SCA</button>
             </div>
           </div>
           <div class="metrics-grid">
-            ${metric("PDFs locais", String(totalUploads), "arquivos guardados neste aparelho")}
-            ${metric("PDF ativo", activeUpload ? "1" : "0", activeUpload ? activeUpload.originalName : "nenhum selecionado")}
-            ${metric("Parser", parserStatus.title, parserStatus.caption)}
-            ${metric("Backend", "Zero custo", "sem Firebase nem calção")}
+            ${metric("PDFs salvos", String(totalUploads), "arquivos guardados neste aparelho")}
+            ${metric("Disciplinas", String(disciplineCount), disciplineCount ? "lidas do PDF" : "aguardando importação")}
+            ${metric("Aulas", String(classCount), classCount ? "blocos encontrados" : "horários ainda indisponíveis")}
+            ${metric("Hoje", String(todayClasses.length), nextClass ? `próxima: ${nextClass.startTime}` : "sem aula futura no recorte")}
           </div>
         </div>
       </section>
@@ -223,7 +229,7 @@ function renderLogin() {
         <span class="eyebrow">Alternativa leve</span>
         <h2 class="preview-title">Cada aluno usa o próprio aparelho sem backend externo.</h2>
         <p class="preview-copy">
-          O app abre um perfil local por e-mail, salva o PDF real do SCA no navegador e mantém a estrutura pronta para o parser. Se o aluno trocar de aparelho, basta entrar e reenviar o PDF.
+          O app abre um perfil local por e-mail, salva o PDF real do SCA no navegador e já organiza agenda, grade e disciplinas. Se o aluno trocar de aparelho, basta entrar e reenviar o PDF.
         </p>
         <div class="pill-grid">
           <div class="preview-pill"><strong>Perfil local</strong><span>identificação simples neste navegador</span></div>
@@ -233,7 +239,7 @@ function renderLogin() {
         <div class="mini-stack">
           <div class="mini-card"><small>Passo 1</small><strong>Entrar</strong><span>use nome e e-mail do aluno</span></div>
           <div class="mini-card"><small>Passo 2</small><strong>Enviar PDF</strong><span>o arquivo fica salvo no aparelho</span></div>
-          <div class="mini-card"><small>Passo 3</small><strong>Parser depois</strong><span>a base continua pronta para ler o SCA</span></div>
+          <div class="mini-card"><small>Passo 3</small><strong>Usar a agenda</strong><span>horários e disciplinas aparecem após a leitura</span></div>
         </div>
       </aside>
     </div>
@@ -241,15 +247,30 @@ function renderLogin() {
 }
 
 function renderTab(activeUpload) {
+  const academicData = getAcademicData(activeUpload);
+  const schedule = academicData?.schedule || [];
+  const disciplines = academicData?.disciplines || [];
+  const todayClasses = getClassesForDate(schedule, state.referenceDate);
+  const weekView = buildWeekView(schedule, state.referenceDate);
+  const nextClass = findNextClass(schedule, state.referenceDate);
+
   if (state.activeTab === "week") {
+    if (!activeUpload) {
+      return renderMissingPdfState("Importe o PDF do SCA para montar sua grade semanal.");
+    }
+
     return `
       <section class="paper-card">
         <div class="section-topline">Grade semanal</div>
-        <h2 class="section-title">Aguardando o parser do PDF ativo</h2>
+        <h2 class="section-title">${escape(weekTitle(state.referenceDate))}</h2>
         <p class="section-copy">
-          A visão semanal ficará populada assim que o parser real ler o PDF ${activeUpload ? `“${escape(activeUpload.originalName)}”` : "que você enviar na aba SCA"}.
+          ${weekView.some((day) => day.classes.length)
+            ? "Sua semana foi organizada a partir do PDF importado."
+            : "O PDF foi salvo, mas não encontrei blocos de aula suficientes para montar a semana."}
         </p>
-        ${renderParserToast(activeUpload)}
+        <div class="week-grid" style="margin-top: 1rem;">
+          ${weekView.map(renderDayColumn).join("")}
+        </div>
       </section>
     `;
   }
@@ -287,7 +308,7 @@ function renderTab(activeUpload) {
           <div class="section-topline">Upload SCA</div>
           <h2 class="section-title">Envie o PDF real do aluno</h2>
           <p class="section-copy">
-            O arquivo será salvo localmente neste aparelho e marcado como pronto para o parser real. Não há horários pré-carregados nesta versão.
+            O arquivo oficial do SCA fica salvo neste aparelho e, quando reconhecido, preenche a agenda, a grade e as disciplinas do aluno.
           </p>
           <div class="upload-drop" style="margin-top: 1rem;">
             <input id="pdfInput" class="file-input" type="file" accept="application/pdf,.pdf" />
@@ -297,7 +318,7 @@ function renderTab(activeUpload) {
             </div>
             <ul>
               <li>Formato esperado: “Relação de Disciplinas por Acadêmico”.</li>
-              <li>O upload fica salvo apenas neste aparelho.</li>
+              <li>Os dados ficam salvos apenas neste aparelho.</li>
               <li>Se limpar os dados do navegador, será preciso reenviar o arquivo.</li>
             </ul>
           </div>
@@ -308,16 +329,44 @@ function renderTab(activeUpload) {
           <h2 class="section-title">${activeUpload ? escape(activeUpload.originalName) : "Nenhum PDF selecionado ainda"}</h2>
           <div class="mini-stack" style="margin-top: 1rem;">
             <div class="mini-card"><small>Aluno</small><strong>${escape(state.user.displayName || "Aluno UFTM")}</strong><span>${escape(state.user.email || state.user.uid)}</span></div>
-            <div class="mini-card"><small>Status do arquivo</small><strong>${escape(getUploadStatusLabel(activeUpload))}</strong><span>${escape(getParserStatusLabel(activeUpload).caption)}</span></div>
+            <div class="mini-card"><small>Status do arquivo</small><strong>${escape(getUploadStatusLabel(activeUpload))}</strong><span>${escape(getExtractionCaption(activeUpload))}</span></div>
             <div class="mini-card"><small>Último envio</small><strong>${escape(activeUpload ? formatShortDateTime(activeUpload.uploadedAtClient) : "sem envio")}</strong><span>${escape(activeUpload ? formatBytes(activeUpload.size) : "aguardando PDF")}</span></div>
           </div>
         </aside>
+      </section>
+      <section class="panel-grid" style="margin-top: 1rem;">
+        <article class="paper-card">
+          <div class="section-topline">Dados do aluno</div>
+          <h2 class="section-title">${escape(academicData?.profile?.studentName || state.user.displayName || "Aluno")}</h2>
+          <div class="mini-grid" style="margin-top: 1rem;">
+            <div class="mini-card"><small>Matrícula</small><strong>${escape(academicData?.profile?.studentId || "não encontrada")}</strong><span>identificação acadêmica</span></div>
+            <div class="mini-card"><small>Curso</small><strong>${escape(academicData?.profile?.course || "não encontrado")}</strong><span>curso importado do PDF</span></div>
+            <div class="mini-card"><small>Período</small><strong>${escape(academicData?.profile?.period || "não encontrado")}</strong><span>período letivo</span></div>
+            <div class="mini-card"><small>Arquivo</small><strong>${escape(activeUpload ? activeUpload.originalName : "sem PDF")}</strong><span>${escape(academicData?.summary?.classCount ? `${academicData.summary.classCount} blocos carregados` : "envie o PDF oficial")}</span></div>
+          </div>
+        </article>
+        <aside class="paper-card">
+          <div class="section-topline">Resumo</div>
+          <h2 class="section-title">O que foi importado do PDF</h2>
+          <div class="mini-stack" style="margin-top: 1rem;">
+            <div class="mini-card"><small>Disciplinas</small><strong>${String(disciplines.length)}</strong><span>componentes reconhecidos</span></div>
+            <div class="mini-card"><small>Horários</small><strong>${String(schedule.length)}</strong><span>blocos identificados no semestre</span></div>
+            <div class="mini-card"><small>Páginas</small><strong>${escape(String(academicData?.profile?.pages || 0))}</strong><span>lidas do PDF</span></div>
+          </div>
+        </aside>
+      </section>
+      <section class="paper-card" style="margin-top: 1rem;">
+        <div class="section-topline">Disciplinas</div>
+        <h2 class="section-title">Componentes encontrados no PDF</h2>
+        <div class="discipline-grid" style="margin-top: 1rem;">
+          ${disciplines.length ? disciplines.map(renderDiscipline).join("") : `<div class="empty-state">Ainda não consegui ler disciplinas deste arquivo. Tente reenviar o PDF oficial do SCA.</div>`}
+        </div>
       </section>
       <section class="paper-card" style="margin-top: 1rem;">
         <div class="section-topline">Arquivos do aparelho</div>
         <h2 class="section-title">PDFs salvos neste perfil local</h2>
         <p class="section-copy">
-          Cada arquivo fica preso a este navegador/aparelho e pode ser definido como PDF ativo para o parser.
+          Cada arquivo fica preso a este navegador/aparelho e pode ser definido como o PDF ativo do aluno.
         </p>
         <div class="upload-list" style="margin-top: 1rem;">
           ${state.uploads.length ? state.uploads.map((item) => renderUploadItem(item, activeUpload)).join("") : `<div class="empty-state">Nenhum PDF enviado ainda. Faça o primeiro upload para vincular o arquivo a este perfil local.</div>`}
@@ -332,40 +381,30 @@ function renderTab(activeUpload) {
         <div class="timeline-topline">Hoje</div>
         <h2 class="section-title">${escape(formatLongDate(state.referenceDate))}</h2>
         <p class="section-copy">
-          Seus horários vão aparecer aqui quando o parser real processar o PDF ativo salvo neste aparelho.
+          ${todayClasses.length
+            ? `Você tem ${todayClasses.length} bloco${todayClasses.length > 1 ? "s" : ""} programado${todayClasses.length > 1 ? "s" : ""} nesta data.`
+            : "Não encontrei aulas nesta data no PDF importado."}
         </p>
-        ${renderParserToast(activeUpload)}
+        <div class="toast ${nextClass ? "" : "is-warning"}">
+          ${nextClass
+            ? `Próxima aula: ${escape(nextClass.title)} em ${escape(nextClass.day)} às ${escape(nextClass.startTime)}.`
+            : "Ainda não encontrei uma próxima aula a partir da data selecionada."}
+        </div>
+        <div class="timeline-list" style="margin-top: 1rem;">
+          ${activeUpload ? (todayClasses.length ? todayClasses.map(renderSchedule).join("") : `<div class="empty-state">Não há aulas nesta data. Tente mudar a data de referência.</div>`) : renderMissingPdfState("Importe o PDF do SCA para carregar sua agenda de hoje.")}
+        </div>
       </article>
       <aside class="paper-card">
         <div class="section-topline">Resumo local</div>
-        <h2 class="section-title">Tudo pronto para o primeiro PDF real</h2>
+        <h2 class="section-title">${escape(academicData?.profile?.studentName || "Dados do aluno")}</h2>
         <div class="mini-grid" style="margin-top: 1rem;">
-          <div class="mini-card"><small>Aluno</small><strong>${escape(state.user.displayName || "Aluno UFTM")}</strong><span>${escape(state.user.email || shortUid(state.user.uid))}</span></div>
+          <div class="mini-card"><small>Matrícula</small><strong>${escape(academicData?.profile?.studentId || "não encontrada")}</strong><span>${escape(academicData?.profile?.period || "período não encontrado")}</span></div>
           <div class="mini-card"><small>PDF ativo</small><strong>${activeUpload ? "Selecionado" : "Pendente"}</strong><span>${escape(activeUpload ? activeUpload.originalName : "envie pela aba SCA")}</span></div>
-          <div class="mini-card"><small>Uploads</small><strong>${String(state.uploads.length)}</strong><span>arquivos locais neste aparelho</span></div>
-          <div class="mini-card"><small>Parser</small><strong>${escape(getParserStatusLabel(activeUpload).title)}</strong><span>${escape(getParserStatusLabel(activeUpload).caption)}</span></div>
+          <div class="mini-card"><small>Disciplinas</small><strong>${String(disciplines.length)}</strong><span>${escape(academicData?.profile?.course || "curso não encontrado")}</span></div>
+          <div class="mini-card"><small>Semana</small><strong>${String(weekView.reduce((acc, day) => acc + day.classes.length, 0))}</strong><span>blocos visíveis na semana</span></div>
         </div>
       </aside>
     </section>
-  `;
-}
-
-function renderParserToast(activeUpload) {
-  if (!activeUpload) {
-    return `
-      <div class="toast is-warning" style="margin-top: 1rem;">
-        Nenhum PDF real foi enviado ainda. Vá para a aba SCA e salve o arquivo oficial do aluno neste aparelho.
-        <div class="button-row" style="margin-top: 0.75rem;">
-          <button class="ghost" data-action="set-tab" data-tab="sca">Abrir aba SCA</button>
-        </div>
-      </div>
-    `;
-  }
-
-  return `
-    <div class="toast" style="margin-top: 1rem;">
-      O PDF ${escape(activeUpload.originalName)} já está salvo localmente e marcado como pronto para o parser real. Quando o extrator for ligado, os horários poderão aparecer automaticamente.
-    </div>
   `;
 }
 
@@ -402,7 +441,7 @@ function renderUploadItem(item, activeUpload) {
       </div>
       <div class="item-meta">
         <span class="tag">${isActive ? "PDF ativo" : "PDF local"}</span>
-        <span class="tag">${escape(getParserStatusLabel(item).caption)}</span>
+        <span class="tag">${escape(getExtractionCaption(item))}</span>
       </div>
       <div class="button-row" style="margin-top: 0.75rem;">
         ${isActive ? "" : `<button class="ghost" data-action="set-active-upload" data-upload-id="${escapeAttribute(item.id)}">Definir como ativo</button>`}
@@ -617,34 +656,48 @@ async function uploadPdf(file, inputElement) {
 
   const uploadId = createUploadId();
   const uploadedAtClient = new Date().toISOString();
-  const record = {
-    id: uploadId,
-    ownerUid: state.user.uid,
-    originalName: file.name,
-    normalizedName: normalizeFileName(file.name),
-    storagePath: `local://${state.user.uid}/${uploadId}/${normalizeFileName(file.name)}`,
-    size: file.size,
-    contentType: file.type || "application/pdf",
-    status: "uploaded",
-    parserStatus: "ready_for_parser",
-    uploadedAtClient,
-    updatedAt: uploadedAtClient,
-    notes: "PDF salvo localmente neste aparelho e pronto para o parser.",
-    blob: file,
-  };
 
   setState({
     uploadError: "",
-    uploadMessage: `Salvando ${file.name} neste aparelho...`,
-    uploadProgress: 14,
+    uploadMessage: `Lendo ${file.name}...`,
+    uploadProgress: 8,
     activeTab: "sca",
   });
 
   try {
+    const academicData = await extractScaPdfData(file, {
+      displayName: state.user.displayName,
+      studentName: state.user.displayName,
+    });
+
+    const record = {
+      id: uploadId,
+      ownerUid: state.user.uid,
+      originalName: file.name,
+      normalizedName: normalizeFileName(file.name),
+      storagePath: `local://${state.user.uid}/${uploadId}/${normalizeFileName(file.name)}`,
+      size: file.size,
+      contentType: file.type || "application/pdf",
+      status: academicData.schedule.length || academicData.disciplines.length ? "processed" : "limited",
+      uploadedAtClient,
+      updatedAt: uploadedAtClient,
+      notes: academicData.schedule.length || academicData.disciplines.length
+        ? "Arquivo importado com sucesso."
+        : "Não consegui ler todos os dados acadêmicos deste arquivo.",
+      academicData,
+      blob: file,
+    };
+
+    setState({
+      uploadProgress: 56,
+      uploadMessage: "Organizando horários, disciplinas e dados do aluno...",
+      uploadError: "",
+    });
+
     await saveUploadRecord(record);
     setState({
-      uploadProgress: 72,
-      uploadMessage: "Atualizando a lista local do aluno...",
+      uploadProgress: 82,
+      uploadMessage: "Salvando os dados deste aluno neste aparelho...",
       uploadError: "",
     });
 
@@ -661,14 +714,17 @@ async function uploadPdf(file, inputElement) {
       profile,
       uploads,
       uploadProgress: 100,
-      uploadMessage: "PDF salvo localmente e definido como arquivo ativo para o parser.",
+      uploadMessage: academicData.schedule.length || academicData.disciplines.length
+        ? "PDF importado com sucesso. Sua agenda acadêmica já foi preenchida."
+        : "PDF salvo, mas não consegui reconhecer todos os dados acadêmicos.",
       uploadError: "",
+      referenceDate: suggestReferenceDate(academicData.schedule, state.referenceDate),
     });
   } catch (error) {
     setState({
       uploadProgress: 0,
       uploadMessage: "",
-      uploadError: `Não consegui salvar o PDF neste aparelho: ${describeLocalError(error)}`,
+      uploadError: `Não consegui importar este PDF do SCA: ${describeLocalError(error)}`,
     });
   } finally {
     inputElement.value = "";
@@ -759,12 +815,35 @@ async function refreshRuMenu(silent) {
   }
 }
 
-function buildHeroTitle(activeUpload) {
-  const name = firstName(state.user?.displayName || state.user?.email || "Aluno");
+function buildHeroTitle(activeUpload, academicData, todayClasses, nextClass) {
+  const name = firstName(academicData?.profile?.studentName || state.user?.displayName || state.user?.email || "Aluno");
   if (!activeUpload) {
-    return `${name}, envie o PDF real do SCA para começar a montar sua rotina neste aparelho.`;
+    return `${name}, importe seu PDF do SCA para carregar sua agenda acadêmica.`;
   }
-  return `${name}, o PDF ${activeUpload.originalName} já está salvo localmente e pronto para o parser.`;
+  if (todayClasses.length) {
+    return `${name}, hoje você tem ${todayClasses.length} compromisso${todayClasses.length > 1 ? "s" : ""} acadêmico${todayClasses.length > 1 ? "s" : ""}.`;
+  }
+  if (nextClass) {
+    return `${name}, sua próxima aula é ${nextClass.title} em ${nextClass.day} às ${nextClass.startTime}.`;
+  }
+  return `${name}, o PDF ${activeUpload.originalName} foi importado com sucesso.`;
+}
+
+function buildHeroSubtitle(academicData) {
+  if (!academicData) {
+    return "Entre no perfil local do aluno, envie o PDF oficial do SCA e acompanhe a agenda diretamente neste aparelho.";
+  }
+
+  const pieces = [
+    academicData.profile?.course,
+    academicData.profile?.period ? `período ${academicData.profile.period}` : "",
+    academicData.summary?.disciplineCount ? `${academicData.summary.disciplineCount} disciplina${academicData.summary.disciplineCount > 1 ? "s" : ""}` : "",
+    academicData.summary?.classCount ? `${academicData.summary.classCount} bloco${academicData.summary.classCount > 1 ? "s" : ""} de aula` : "",
+  ].filter(Boolean);
+
+  return pieces.length
+    ? `Dados importados do PDF do SCA: ${pieces.join(" • ")}.`
+    : "O arquivo está salvo, mas ainda não consegui extrair informações suficientes deste PDF.";
 }
 
 function getActiveUpload() {
@@ -773,27 +852,158 @@ function getActiveUpload() {
   return state.uploads.find((item) => item.id === activeId) || state.uploads[0] || null;
 }
 
-function getParserStatusLabel(upload) {
+function getAcademicData(upload) {
+  return upload?.academicData || null;
+}
+
+function getExtractionCaption(upload) {
   if (!upload) {
-    return {
-      title: "Pendente",
-      caption: "aguardando o primeiro PDF real",
-    };
+    return "aguardando o primeiro PDF";
   }
 
-  return {
-    title: "Pronto",
-    caption: "arquivo salvo localmente para o parser",
-  };
+  const academicData = getAcademicData(upload);
+  if (academicData?.summary?.classCount || academicData?.summary?.disciplineCount) {
+    return `${academicData.summary.disciplineCount || 0} disciplinas e ${academicData.summary.classCount || 0} blocos identificados`;
+  }
+
+  return "arquivo salvo, mas sem dados suficientes";
 }
 
 function getUploadStatusLabel(upload) {
   if (!upload) return "Sem arquivo";
-  return upload.status === "uploaded" ? "Salvo" : (upload.status || "Salvo");
+  if (upload.status === "processed") return "Importado";
+  if (upload.status === "limited") return "Importado parcialmente";
+  if (upload.status === "uploaded") return "Salvo";
+  return upload.status || "Salvo";
 }
 
 function getStatusMessage() {
   return state.uploadError || state.authError || state.uploadMessage || state.syncMessage;
+}
+
+function renderMissingPdfState(message) {
+  return `
+    <div class="empty-state">
+      ${escape(message)}
+      <div class="button-row" style="margin-top: 0.75rem;">
+        <button class="ghost" data-action="set-tab" data-tab="sca">Abrir SCA</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderDayColumn(day) {
+  return `
+    <article class="day-column ${day.isReference ? "is-reference" : ""}">
+      <header class="day-header">
+        <div class="week-card-top">
+          <h3>${escape(day.label)}</h3>
+          <span class="day-badge">${String(day.classes.length)}</span>
+        </div>
+        <p>${escape(formatLongDate(day.date))}</p>
+      </header>
+      <div class="day-body">
+        ${day.classes.length ? day.classes.map(renderSchedule).join("") : `<div class="empty-day">Sem aulas nesta data.</div>`}
+      </div>
+    </article>
+  `;
+}
+
+function renderSchedule(item) {
+  return `
+    <article class="schedule-item" data-type="${escape(item.type || "Aula")}">
+      <div class="schedule-title-row">
+        <div>
+          <h3 class="schedule-title">${escape(item.title)}</h3>
+          <div class="support-line">${escape(item.group || "Turma")} • ${escape(item.type || "Aula")}</div>
+        </div>
+        <div class="schedule-time">${escape(item.startTime)} - ${escape(item.endTime)}</div>
+      </div>
+      <div class="item-meta">
+        <span class="tag">${escape(item.teacher || "Docente não informado")}</span>
+      </div>
+      <div class="support-line">${escape(shortRange(item.startDate, item.endDate))}</div>
+    </article>
+  `;
+}
+
+function renderDiscipline(item) {
+  return `
+    <article class="discipline-item">
+      <div class="discipline-head">
+        <div>
+          <div class="discipline-code">${escape(item.code || "Sem código")}</div>
+          <h3 class="discipline-title">${escape(item.name)}</h3>
+        </div>
+        <span class="tag">${escape(item.workload ? `${item.workload} h/a` : "Carga não informada")}</span>
+      </div>
+      <dl>
+        <div><dt>Docente</dt><dd>${escape(item.teacher || "Não informado")}</dd></div>
+        <div><dt>E-mail</dt><dd>${escape(item.email || "Não informado")}</dd></div>
+        <div><dt>Vigência</dt><dd>${escape(item.period || "Não informada")}</dd></div>
+      </dl>
+    </article>
+  `;
+}
+
+function getClassesForDate(schedule, isoDate) {
+  const day = toDate(isoDate);
+  return schedule
+    .filter((item) => item.weekday === day.getDay() && day >= toDate(item.startDate) && day <= toDate(item.endDate))
+    .sort((left, right) => left.startTime.localeCompare(right.startTime));
+}
+
+function buildWeekView(schedule, referenceDate) {
+  const monday = weekStart(toDate(referenceDate));
+  return Array.from({ length: 5 }, (_, index) => {
+    const date = addDays(monday, index);
+    const isoDate = toISO(date);
+    return {
+      date: isoDate,
+      label: weekdays[date.getDay()],
+      isReference: isoDate === referenceDate,
+      classes: getClassesForDate(schedule, isoDate),
+    };
+  });
+}
+
+function findNextClass(schedule, referenceDate) {
+  const start = toDate(referenceDate);
+  for (let offset = 0; offset < 21; offset += 1) {
+    const date = addDays(start, offset);
+    const classes = getClassesForDate(schedule, toISO(date));
+    if (classes.length) {
+      return classes[0];
+    }
+  }
+  return null;
+}
+
+function suggestReferenceDate(schedule, fallbackDate) {
+  if (!schedule.length) {
+    return fallbackDate;
+  }
+
+  const today = toISO(new Date());
+  const todayClasses = getClassesForDate(schedule, today);
+  if (todayClasses.length) {
+    return today;
+  }
+
+  const next = findNextClass(schedule, today);
+  return next ? next.startDate : fallbackDate;
+}
+
+function weekTitle(referenceDate) {
+  const monday = weekStart(toDate(referenceDate));
+  const friday = addDays(monday, 4);
+  return `Semana de ${monday.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })} a ${friday.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}`;
+}
+
+function shortRange(startDate, endDate) {
+  const start = toDate(startDate).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+  const end = toDate(endDate).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
+  return `${start} até ${end}`;
 }
 
 function loadUiState() {
@@ -1021,6 +1231,8 @@ function shortUid(uid) {
   return String(uid || "").slice(0, 8);
 }
 
+const weekdays = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+
 function formatBytes(bytes) {
   if (!Number.isFinite(bytes) || bytes <= 0) return "0 KB";
 
@@ -1070,6 +1282,18 @@ function formatDateShort(isoDate) {
 function toDate(isoDate) {
   const [year, month, day] = String(isoDate).split("-").map(Number);
   return new Date(year, (month || 1) - 1, day || 1);
+}
+
+function addDays(date, amount) {
+  const next = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+function weekStart(date) {
+  const day = date.getDay();
+  const offset = day === 0 ? -6 : 1 - day;
+  return addDays(date, offset);
 }
 
 function toISO(date) {
