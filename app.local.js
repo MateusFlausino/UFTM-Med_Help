@@ -545,12 +545,18 @@ async function onClick(event) {
 
 function onInput(event) {
   if (event.target.id === "loginName") {
-    setState({ draftName: event.target.value || "" });
+    setState({
+      draftName: event.target.value || "",
+      authError: "",
+    }, { render: false });
     return;
   }
 
   if (event.target.id === "loginEmail") {
-    setState({ draftEmail: event.target.value || "" });
+    setState({
+      draftEmail: event.target.value || "",
+      authError: "",
+    }, { render: false });
   }
 }
 
@@ -1036,10 +1042,13 @@ function persistUiState() {
   );
 }
 
-function setState(patch) {
+function setState(patch, options = {}) {
+  const shouldRender = options.render !== false;
   state = { ...state, ...patch };
   persistUiState();
-  render();
+  if (shouldRender) {
+    render();
+  }
 }
 
 function loadSession() {
