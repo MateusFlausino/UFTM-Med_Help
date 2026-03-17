@@ -13,6 +13,10 @@ const DAY_TO_WEEKDAY = {
   quinta: 4,
   sexta: 5,
 };
+const PDFJS_IMPORT_CANDIDATES = [
+  "./vendor/pdfjs/pdf.mjs",
+  "./node_modules/pdfjs-dist/legacy/build/pdf.mjs",
+];
 let pdfjsModulePromise = null;
 
 export async function extractScaPdfData(file, fallbackProfile = {}) {
@@ -44,13 +48,14 @@ export async function extractScaPdfData(file, fallbackProfile = {}) {
       pageNumber,
       lines,
       text: lines.map((line) => line.text).join("\n"),
+      rawText: normalizeSpacing(textContent.items.map((item) => String(item.str || "").trim()).filter(Boolean).join(" ")),
     });
   }
 
-  const fullText = pages.map((page) => page.text).join("\n");
+  const fullText = normalizeSpacing(pages.map((page) => page.rawText || page.text).join(" "));
   const profile = extractProfile(fullText, fallbackProfile, pdf.numPages);
   const disciplines = extractDisciplines(fullText);
-  const schedule = extractSchedule(pages);
+  const schedule = extractSchedule(fullText);
 
   return {
     profile,
@@ -67,12 +72,24 @@ export async function extractScaPdfData(file, fallbackProfile = {}) {
 
 async function loadPdfJs() {
   if (!pdfjsModulePromise) {
-    pdfjsModulePromise = import("https://mozilla.github.io/pdf.js/build/pdf.mjs").catch((error) => {
+    pdfjsModulePromise = loadLocalPdfJs().catch(() => {
       pdfjsModulePromise = null;
       throw new Error("não consegui carregar o leitor de PDF necessário para importar este arquivo");
     });
   }
   return pdfjsModulePromise;
+}
+
+async function loadLocalPdfJs() {
+  for (const candidate of PDFJS_IMPORT_CANDIDATES) {
+    try {
+      return await import(candidate);
+    } catch (error) {
+      // tenta o próximo caminho local disponível
+    }
+  }
+
+  throw new Error("pdf.js indisponível");
 }
 
 function groupItemsIntoLines(items) {
@@ -120,6 +137,10 @@ function groupItemsIntoLines(items) {
 
 function extractProfile(fullText, fallbackProfile, pages) {
   const normalizedText = normalizeSpacing(fullText);
+  const academicRecord = normalizedText.match(
+    /Acad[eê]mico\s*:\s*([0-9.\-/]+)\s*-\s*(.+?)(?=\bDisciplina\b|\bC\.H\b|\bDia da Semana\b|Página\s+\d+\/\d+)/i
+  );
+
   return {
     sourceTitle: "Relação de Disciplinas por Acadêmico",
     course: pickFirstMatch(normalizedText, [
@@ -133,13 +154,13 @@ function extractProfile(fullText, fallbackProfile, pages) {
     studentId: pickFirstMatch(normalizedText, [
       /Matr[ií]cula\s*:\s*([0-9.\-/]+)/i,
       /\bRA\s*:\s*([0-9.\-/]+)/i,
-    ]) || fallbackProfile.studentId || "",
+      /Acad[eê]mico\s*:\s*([0-9.\-/]+)/i,
+    ]) || academicRecord?.[1] || fallbackProfile.studentId || "",
     studentName: cleanPersonName(
       pickFirstMatch(normalizedText, [
-        /Acad[eê]mico\s*:\s*([^]+?)(?=Matr[ií]cula|RA|Curso|Per[ií]odo)/i,
         /Aluno\s*:\s*([^]+?)(?=Matr[ií]cula|RA|Curso|Per[ií]odo)/i,
         /Nome\s*:\s*([^]+?)(?=Matr[ií]cula|RA|Curso|Per[ií]odo)/i,
-      ]) || fallbackProfile.studentName || fallbackProfile.displayName || ""
+      ]) || academicRecord?.[2] || fallbackProfile.studentName || fallbackProfile.displayName || ""
     ),
     pages,
   };
@@ -147,6 +168,24 @@ function extractProfile(fullText, fallbackProfile, pages) {
 
 function extractDisciplines(fullText) {
   const beforeWeek = splitBeforeWeekSchedule(fullText);
+  const entries = [];
+  const pattern = /(\d{4}\.\d{3}\.\d{3}-\d)\s*-\s*(.+?)\s+(\d+(?:[.,]\d+)?)\s+([A-ZÀ-ÚÇÃÕ.\- ]+?)\s+\(([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})\)\s+(\d{2}\/\d{2}\/\d{4}\s*-\s*\d{2}\/\d{2}\/\d{4})/gi;
+
+  for (const match of beforeWeek.matchAll(pattern)) {
+    entries.push({
+      code: match[1] || "",
+      name: cleanTitle(match[2] || ""),
+      workload: String(match[3] || "").replace(",", "."),
+      teacher: cleanPersonName(match[4] || ""),
+      email: String(match[5] || "").toLowerCase(),
+      period: match[6] || "",
+    });
+  }
+
+  if (entries.length) {
+    return uniqueBy(entries, (item) => item.code);
+  }
+
   const blocks = beforeWeek
     .split(/(?=\d{4}\.\d{3}\.\d{3}-\d)/g)
     .map((item) => normalizeSpacing(item))
@@ -184,35 +223,30 @@ function extractDisciplines(fullText) {
   }).filter((item) => item.code && item.name);
 }
 
-function extractSchedule(pages) {
+function extractSchedule(fullText) {
+  const normalizedText = normalizeSpacing(fullText).replace(
+    /Universidade Federal do Tri[aâ]ngulo Mineiro.+?P[aá]gina\s+\d+\/\d+/gi,
+    " "
+  );
   const sections = {};
-  let currentDay = "";
+  const sectionPattern = /Dia da Semana:\s*(Segunda|Terça|Terca|Quarta|Quinta|Sexta)\s+Per[ií]odo\s+Turma\s+Disciplina\s+Hor[aá]rio\s+Docente\s+(.+?)(?=Dia da Semana:\s*(?:Segunda|Terça|Terca|Quarta|Quinta|Sexta)\s+Per[ií]odo\s+Turma\s+Disciplina\s+Hor[aá]rio\s+Docente|$)/gi;
 
-  for (const page of pages) {
-    for (const line of page.lines) {
-      const dayKey = toDayKey(line.text);
-      if (dayKey) {
-        currentDay = dayKey;
-        sections[currentDay] = sections[currentDay] || [];
-        continue;
-      }
-
-      if (!currentDay) {
-        continue;
-      }
-
-      sections[currentDay].push(line.text);
+  for (const match of normalizedText.matchAll(sectionPattern)) {
+    const dayKey = toDayKey(match[1]);
+    if (!dayKey) {
+      continue;
     }
+    sections[dayKey] = normalizeSpacing(match[2] || "");
   }
 
   const entries = [];
   for (const dayKey of DAY_ORDER) {
-    const joined = normalizeSpacing((sections[dayKey] || []).join(" "));
+    const joined = normalizeSpacing(sections[dayKey] || "");
     if (!joined) {
       continue;
     }
 
-    const pattern = /(\d{2}\/\d{2}\/\d{4}(?:\s*-\s*\d{2}\/\d{2}\/\d{4})?)\s+([A-Z]{1,3}\d{1,2})\s+(.+?)\s+(\d{2}:\d{2}\s*-\s*\d{2}:\d{2})(?:\s+([A-ZÀ-ÚÇÃÕ.\- ]+?))(?=(?:\d{2}\/\d{2}\/\d{4}(?:\s*-\s*\d{2}\/\d{2}\/\d{4})?\s+[A-Z]{1,3}\d{1,2})|$)/g;
+    const pattern = /(\d{2}\/\d{2}\/\d{4}(?:\s*-\s*\d{2}\/\d{2}\/\d{4})?)\s+([A-Z]{1,3}\d{1,2})\s+(.+?)\s+(\d{2}:\d{2}\s*-\s*\d{2}:\d{2})\s+([A-ZÀ-ÚÇÃÕ.\- ]+?)(?=(?:\d{2}\/\d{2}\/\d{4}(?:\s*-\s*\d{2}\/\d{2}\/\d{4})?\s+[A-Z]{1,3}\d{1,2})|$)/g;
     for (const match of joined.matchAll(pattern)) {
       const dateRange = match[1];
       const group = match[2];
@@ -294,11 +328,11 @@ function inferClassType(group) {
 }
 
 function cleanTitle(value) {
-  return normalizeSpacing(String(value || "").replace(/\bDOCENTE\b.*$/i, ""));
+  return normalizeSpacing(String(value || "").replace(/^\-\s*/, "").replace(/\bDOCENTE\b.*$/i, ""));
 }
 
 function cleanPersonName(value) {
-  return normalizeSpacing(String(value || "").replace(/\bE-?MAIL\b.*$/i, ""));
+  return normalizeSpacing(String(value || "").replace(/[()]/g, "").replace(/\bE-?MAIL\b.*$/i, ""));
 }
 
 function pickFirstMatch(text, patterns) {

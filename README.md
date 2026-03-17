@@ -1,6 +1,6 @@
-# UFTM Mobile
+# Agenda DAGV
 
-Versão web do UFTM Mobile voltada aos estudantes de Medicina da UFTM, agora preparada para funcionar sem Firebase e sem serviço pago.
+Painel web do DAGV voltado aos estudantes de Medicina, preparado para reunir horários, RU e o PDF do SCA sem depender de serviço pago.
 
 ## O que já está pronto
 
@@ -17,7 +17,7 @@ Versão web do UFTM Mobile voltada aos estudantes de Medicina da UFTM, agora pre
 3. O PDF oficial do SCA é armazenado no próprio aparelho.
 4. O app extrai dados do aluno, disciplinas e horários do PDF.
 5. O arquivo pode ser aberto novamente e marcado como PDF ativo.
-6. As abas `Hoje` e `Grade` mostram a agenda acadêmica importada.
+6. As abas `Hoje` e `Semana` mostram a agenda acadêmica importada.
 
 ## Limitações desta alternativa
 
@@ -29,7 +29,7 @@ Versão web do UFTM Mobile voltada aos estudantes de Medicina da UFTM, agora pre
 
 - [index.html](C:/Users/flaus/Downloads/UFTM%20medmbile/index.html): entrada da aplicação
 - [app.local.js](C:/Users/flaus/Downloads/UFTM%20medmbile/app.local.js): fluxo local do aluno e uploads do PDF
-- [app.js](C:/Users/flaus/Downloads/UFTM%20medmbile/app.js): implementação anterior baseada em Firebase
+- [app.js](C:/Users/flaus/Downloads/UFTM%20medmbile/app.js): implementação anterior do projeto
 - [styles.css](C:/Users/flaus/Downloads/UFTM%20medmbile/styles.css): identidade visual
 - [api/ru-abadia.js](C:/Users/flaus/Downloads/UFTM%20medmbile/api/ru-abadia.js): endpoint do cardápio RU
 - [ru-abadia.js](C:/Users/flaus/Downloads/UFTM%20medmbile/ru-abadia.js): extração do cardápio oficial

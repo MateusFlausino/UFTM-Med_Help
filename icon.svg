@@ -1,18 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="UFTM Mobile">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Agenda DAGV">
   <defs>
     <linearGradient id="bg" x1="0%" x2="100%" y1="0%" y2="100%">
-      <stop offset="0%" stop-color="#006837" />
-      <stop offset="100%" stop-color="#004e29" />
+      <stop offset="0%" stop-color="#7a1f24" />
+      <stop offset="100%" stop-color="#471317" />
+    </linearGradient>
+    <linearGradient id="paper" x1="0%" x2="100%" y1="0%" y2="100%">
+      <stop offset="0%" stop-color="#fff7ef" />
+      <stop offset="100%" stop-color="#f2dccf" />
     </linearGradient>
   </defs>
   <rect width="256" height="256" rx="56" fill="url(#bg)" />
-  <circle cx="128" cy="76" r="34" fill="#f9b233" opacity="0.95" />
-  <path
-    d="M61 121h34v70c0 5 2 8 7 8s7-3 7-8v-70h38v71c0 25-15 40-43 40s-43-15-43-40z"
-    fill="#f7f1de"
-  />
-  <path
-    d="M162 121h33l16 27 16-27h33l-33 52v44h-32v-44z"
-    fill="#f9b233"
-  />
+  <circle cx="196" cy="60" r="24" fill="#d3a48c" opacity="0.9" />
+  <rect x="54" y="48" width="148" height="160" rx="30" fill="url(#paper)" />
+  <rect x="76" y="78" width="104" height="18" rx="9" fill="#7a1f24" opacity="0.18" />
+  <rect x="76" y="110" width="72" height="18" rx="9" fill="#7a1f24" opacity="0.26" />
+  <rect x="76" y="142" width="96" height="18" rx="9" fill="#7a1f24" opacity="0.18" />
+  <rect x="76" y="174" width="58" height="18" rx="9" fill="#7a1f24" opacity="0.26" />
+  <path d="M162 108h22v84h-22z" fill="#7a1f24" opacity="0.82" />
+  <path d="M173 108l18 16-18 16z" fill="#d3a48c" opacity="0.96" />
 </svg>

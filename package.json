@@ -2,8 +2,12 @@
   "name": "uftm-mobile-web",
   "version": "1.0.0",
   "private": true,
-  "description": "Versão web do UFTM Mobile",
+  "description": "Painel web do DAGV para aulas, RU e SCA",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "postinstall": "node scripts/prepare-assets.js"
+  },
+  "dependencies": {
+    "pdfjs-dist": "^5.5.207"
   }
 }

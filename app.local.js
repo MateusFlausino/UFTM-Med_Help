@@ -1,5 +1,10 @@
 import { extractScaPdfData } from "./sca-parser.js";
 
+const APP_NAME = "Agenda DAGV";
+const APP_MARK = "DAGV";
+const APP_TAGLINE = "Horários, RU e SCA no espaço do DA";
+const DA_PORTAL_URL = "https://dagvmeduftm.wordpress.com/festas/";
+
 const UI_STORAGE_KEY = "uftm-mobile-local-ui-v1";
 const SESSION_STORAGE_KEY = "uftm-mobile-local-session-v1";
 const PROFILE_STORAGE_PREFIX = "uftm-mobile-local-profile-";
@@ -9,7 +14,7 @@ const UPLOAD_STORE = "uploads";
 
 const navItems = [
   { id: "today", label: "Hoje" },
-  { id: "week", label: "Grade" },
+  { id: "week", label: "Semana" },
   { id: "menu", label: "RU" },
   { id: "sca", label: "SCA" },
 ];
@@ -40,7 +45,7 @@ let state = {
   referenceDate: uiState.referenceDate || toISO(new Date()),
   menu: Array.isArray(uiState.menu) && uiState.menu.length ? uiState.menu : defaultMenu,
   lastMenuSync: uiState.lastMenuSync || "",
-  syncMessage: uiState.syncMessage || "Buscando cardápio oficial da Abadia.",
+  syncMessage: uiState.syncMessage || "Buscando o cardápio da Abadia para o painel do DA.",
   authChecking: true,
   authError: "",
   user: null,
@@ -81,7 +86,7 @@ async function restoreLocalSession() {
   if (!session) {
     setState({
       authChecking: false,
-      syncMessage: "Modo local pronto. Abra seu perfil neste aparelho para enviar o PDF do SCA.",
+      syncMessage: "Painel do DA pronto. Abra seu perfil neste aparelho para enviar o PDF do SCA.",
     });
     return;
   }
@@ -98,8 +103,8 @@ async function restoreLocalSession() {
     uploads,
     uploadError: "",
     uploadMessage: uploads.length
-      ? "Perfil local restaurado com seus PDFs salvos neste aparelho."
-      : "Perfil local restaurado. Envie o primeiro PDF do SCA.",
+      ? "Perfil restaurado com seus arquivos salvos neste aparelho."
+      : "Perfil restaurado. Envie o primeiro PDF do SCA.",
   });
 }
 
@@ -121,10 +126,10 @@ function render() {
     <div class="app-view">
       <header class="header-bar">
         <div class="header-brand">
-          <span class="brand-mark">UFTM</span>
+          <span class="brand-mark">${APP_MARK}</span>
           <div class="header-copy">
-            <h1>UFTM Mobile</h1>
-            <p>Perfil local do aluno e PDFs salvos no próprio aparelho</p>
+            <h1>${APP_NAME}</h1>
+            <p>${APP_TAGLINE}</p>
           </div>
         </div>
         <div class="status-inline">
@@ -135,10 +140,11 @@ function render() {
           <div class="user-chip">
             ${renderAvatar(state.user)}
             <div>
-              <strong>${escape(state.user.displayName || "Aluno UFTM")}</strong>
+              <strong>${escape(state.user.displayName || "Aluno")}</strong>
               <span>${escape(state.user.email || state.user.uid)}</span>
             </div>
           </div>
+          <a class="ghost link-button" href="${escapeAttribute(DA_PORTAL_URL)}" target="_blank" rel="noreferrer">Portal do DA</a>
           <button class="ghost" data-action="sync-ru">Atualizar RU</button>
           <button class="ghost" data-action="logout">Trocar aluno</button>
         </div>
@@ -146,7 +152,7 @@ function render() {
 
       <section class="hero-card">
         <div class="hero-content">
-          <div class="hero-topline">Agenda acadêmica do aluno</div>
+          <div class="hero-topline">Agenda do DA para Medicina</div>
           <div class="hero-band">
             <span class="hero-chip">ID local ${escape(shortUid(state.user.uid))}</span>
             <span class="hero-chip">${escape(academicData?.profile?.course || "Curso não identificado")}</span>
@@ -192,14 +198,14 @@ function renderLogin() {
   const canLogin = !state.authChecking;
   const loginLabel = state.authChecking ? "Abrindo armazenamento local..." : "Entrar neste aparelho";
   const setupTitle = state.authChecking
-    ? "Preparando o modo local do app."
-    : "Crie um perfil local do aluno. Não precisa de Firebase, cartão ou mensalidade.";
+    ? "Preparando o painel local do DA."
+    : "Crie um perfil local do aluno para usar horários, RU e SCA sem depender de serviço pago.";
 
   return `
     <div class="login-layout">
       <section class="login-card">
-        <span class="eyebrow">Entrada local</span>
-        <h1>UFTM Mobile sem Firebase, pronto para guardar o PDF no aparelho.</h1>
+        <span class="eyebrow">Painel do DA</span>
+        <h1>${APP_NAME}, pronto para guardar o PDF do SCA no aparelho.</h1>
         <p>${escape(setupTitle)}</p>
         <div class="form-grid">
           <div class="inline-field">
@@ -213,6 +219,7 @@ function renderLogin() {
         </div>
         <div class="login-actions" style="margin-top: 1rem;">
           <button class="cta" data-action="login-local" ${canLogin ? "" : "disabled"}>${escape(loginLabel)}</button>
+          <a class="ghost link-button" href="${escapeAttribute(DA_PORTAL_URL)}" target="_blank" rel="noreferrer">Portal do DA</a>
           <button class="ghost" data-action="sync-ru">Atualizar RU</button>
         </div>
         <div class="toast ${state.authError ? "is-warning" : ""}" style="margin-top: 1rem;">
@@ -220,26 +227,26 @@ function renderLogin() {
         </div>
         <div class="facts-grid" style="margin-top: 1.25rem;">
           <div class="fact"><strong>Sem calção</strong><p>não depende de serviço pago</p></div>
+          <div class="fact"><strong>Do DA</strong><p>marca e entrada centralizadas no diretório</p></div>
           <div class="fact"><strong>Local</strong><p>perfil e PDFs ficam no aparelho</p></div>
-          <div class="fact"><strong>Simples</strong><p>pronto para começar com o SCA</p></div>
         </div>
       </section>
 
       <aside class="preview-card">
-        <span class="eyebrow">Alternativa leve</span>
-        <h2 class="preview-title">Cada aluno usa o próprio aparelho sem backend externo.</h2>
+        <span class="eyebrow">Identidade DAGV</span>
+        <h2 class="preview-title">Horários, RU e SCA reunidos em um painel do DA.</h2>
         <p class="preview-copy">
-          O app abre um perfil local por e-mail, salva o PDF real do SCA no navegador e já organiza agenda, grade e disciplinas. Se o aluno trocar de aparelho, basta entrar e reenviar o PDF.
+          O aluno entra neste navegador, envia o PDF real do SCA e acompanha agenda, semana e RU em uma interface pensada para o diretório acadêmico.
         </p>
         <div class="pill-grid">
-          <div class="preview-pill"><strong>Perfil local</strong><span>identificação simples neste navegador</span></div>
+          <div class="preview-pill"><strong>Painel do DA</strong><span>atalho direto para o portal estudantil</span></div>
           <div class="preview-pill"><strong>PDF local</strong><span>armazenado com IndexedDB no aparelho</span></div>
-          <div class="preview-pill"><strong>Sem mensalidade</strong><span>zero dependência do Firebase</span></div>
+          <div class="preview-pill"><strong>Agenda real</strong><span>horários e disciplinas saem do SCA</span></div>
         </div>
         <div class="mini-stack">
           <div class="mini-card"><small>Passo 1</small><strong>Entrar</strong><span>use nome e e-mail do aluno</span></div>
           <div class="mini-card"><small>Passo 2</small><strong>Enviar PDF</strong><span>o arquivo fica salvo no aparelho</span></div>
-          <div class="mini-card"><small>Passo 3</small><strong>Usar a agenda</strong><span>horários e disciplinas aparecem após a leitura</span></div>
+          <div class="mini-card"><small>Passo 3</small><strong>Acompanhar o dia</strong><span>aulas e RU ficam prontos após a leitura</span></div>
         </div>
       </aside>
     </div>
@@ -261,7 +268,7 @@ function renderTab(activeUpload) {
 
     return `
       <section class="paper-card">
-        <div class="section-topline">Grade semanal</div>
+        <div class="section-topline">Semana acadêmica</div>
         <h2 class="section-title">${escape(weekTitle(state.referenceDate))}</h2>
         <p class="section-copy">
           ${weekView.some((day) => day.classes.length)
@@ -282,7 +289,7 @@ function renderTab(activeUpload) {
           <div class="section-topline">Cardápio RU</div>
           <h2 class="section-title">Cardápio do dia da Unidade Abadia</h2>
           <p class="section-copy">
-            O app consulta a publicação oficial da UFTM e mostra apenas o cardápio do dia. Esta parte continua funcionando sem Firebase.
+            O painel consulta a publicação oficial do RU e mostra apenas o cardápio do dia, sem tirar o foco da identidade do DA.
           </p>
           <div class="menu-grid" style="margin-top: 1rem;">
             ${state.menu.map(renderMenuCard).join("")}
@@ -290,7 +297,7 @@ function renderTab(activeUpload) {
         </article>
         <aside class="timeline-card">
           <div class="timeline-topline">Sincronização</div>
-          <h2 class="section-title">Atualização diária baseada no PDF oficial</h2>
+          <h2 class="section-title">Atualização diária do RU da Abadia</h2>
           <div class="mini-stack" style="margin-top: 1rem;">
             <div class="mini-card"><small>Última publicação oficial</small><strong>${escape(formatShortDateTime(state.menu[0]?.updatedAt))}</strong><span>arquivo da Abadia</span></div>
             <div class="mini-card"><small>Última verificação</small><strong>${escape(formatShortDateTime(state.lastMenuSync))}</strong><span>salva localmente</span></div>
@@ -308,7 +315,7 @@ function renderTab(activeUpload) {
           <div class="section-topline">Upload SCA</div>
           <h2 class="section-title">Envie o PDF real do aluno</h2>
           <p class="section-copy">
-            O arquivo oficial do SCA fica salvo neste aparelho e, quando reconhecido, preenche a agenda, a grade e as disciplinas do aluno.
+            O arquivo oficial do SCA fica salvo neste aparelho e, quando reconhecido, preenche a agenda do DA com aulas, semana e disciplinas.
           </p>
           <div class="upload-drop" style="margin-top: 1rem;">
             <input id="pdfInput" class="file-input" type="file" accept="application/pdf,.pdf" />
@@ -328,7 +335,7 @@ function renderTab(activeUpload) {
           <div class="section-topline">PDF ativo</div>
           <h2 class="section-title">${activeUpload ? escape(activeUpload.originalName) : "Nenhum PDF selecionado ainda"}</h2>
           <div class="mini-stack" style="margin-top: 1rem;">
-            <div class="mini-card"><small>Aluno</small><strong>${escape(state.user.displayName || "Aluno UFTM")}</strong><span>${escape(state.user.email || state.user.uid)}</span></div>
+            <div class="mini-card"><small>Aluno</small><strong>${escape(state.user.displayName || "Aluno")}</strong><span>${escape(state.user.email || state.user.uid)}</span></div>
             <div class="mini-card"><small>Status do arquivo</small><strong>${escape(getUploadStatusLabel(activeUpload))}</strong><span>${escape(getExtractionCaption(activeUpload))}</span></div>
             <div class="mini-card"><small>Último envio</small><strong>${escape(activeUpload ? formatShortDateTime(activeUpload.uploadedAtClient) : "sem envio")}</strong><span>${escape(activeUpload ? formatBytes(activeUpload.size) : "aguardando PDF")}</span></div>
           </div>
@@ -596,8 +603,8 @@ async function loginLocal() {
       uploads,
       uploadError: "",
       uploadMessage: uploads.length
-        ? "Perfil local reencontrado neste aparelho."
-        : "Perfil local criado. Agora envie o PDF oficial do SCA.",
+        ? "Perfil reencontrado neste aparelho."
+        : "Perfil criado. Agora envie o PDF oficial do SCA.",
       activeTab: uploads.length ? state.activeTab : "sca",
     });
   } catch (error) {
@@ -618,7 +625,7 @@ function logout() {
     uploadProgress: 0,
     openingUploadId: "",
     activeTab: "today",
-    syncMessage: "Sessão local encerrada. Os PDFs continuam guardados neste aparelho.",
+    syncMessage: "Sessão encerrada. Os arquivos continuam guardados neste aparelho.",
   });
 }
 
@@ -633,7 +640,7 @@ async function refreshLocalUploads() {
       uploads,
       uploadError: "",
       uploadMessage: uploads.length
-        ? "Lista local atualizada com os PDFs deste aparelho."
+        ? "Lista local atualizada com os arquivos deste aparelho."
         : "Ainda não há PDFs salvos para este perfil local.",
     });
   } catch (error) {
@@ -831,7 +838,7 @@ function buildHeroTitle(activeUpload, academicData, todayClasses, nextClass) {
 
 function buildHeroSubtitle(academicData) {
   if (!academicData) {
-    return "Entre no perfil local do aluno, envie o PDF oficial do SCA e acompanhe a agenda diretamente neste aparelho.";
+    return "Entre no perfil local do aluno, envie o PDF oficial do SCA e acompanhe a agenda do DA diretamente neste aparelho.";
   }
 
   const pieces = [
