@@ -3,12 +3,16 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2?bundle";
 
 const APP_NAME = "Agenda DAGV";
 const APP_MARK = "DAGV";
-const APP_TAGLINE = "Horários, RU e SCA no espaço do DA";
 const DA_PORTAL_URL = "https://dagvmeduftm.wordpress.com/";
 const SUPABASE_CONFIG_FILE = "supabase-config.js";
 const SUPABASE_BUCKET = "student-pdfs";
 const REGISTRATION_TAB_ID = "registration";
 const DOCUMENT_VIEWER_TAB_ID = "document-viewer";
+const MENU_AUTO_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+const CLASS_NOTIFICATION_LEAD_MINUTES = 10;
+const NOTIFICATION_PROMPT_STORAGE_KEY = "uftm-mobile-notification-prompt-v1";
+const NOTIFICATION_HISTORY_STORAGE_KEY = "uftm-mobile-notification-history-v1";
+const NOTIFICATION_LOOKAHEAD_DAYS = 21;
 const DOCUMENT_TYPES = {
   schedule: "schedule",
   studentCard: "student_card",
@@ -120,6 +124,10 @@ const services = {
 let localDbPromise = null;
 let persistentUploadsIssue = "";
 let authSubscription = null;
+let notificationServiceWorkerRegistration = null;
+let classNotificationTimerId = 0;
+let classNotificationHeartbeatId = 0;
+let scheduledReminderKey = "";
 
 clearPublicBootstrapData();
 
@@ -159,8 +167,9 @@ init().catch((error) => {
 
 async function init() {
   render();
+  void registerNotificationServiceWorker();
   loadPortalTab("home", true);
-  refreshRuMenu(true);
+  refreshRuMenuIfNeeded(true);
 
   if (!supabaseReady) {
     setState({
@@ -516,7 +525,7 @@ function render() {
             </div>
           </div>
           <div class="button-row">
-            ${registration.isComplete ? `<button class="ghost header-action" data-action="sync-ru">RU</button>` : `<span class="header-pill">Cadastro pendente</span>`}
+            ${registration.isComplete ? "" : `<span class="header-pill">Cadastro pendente</span>`}
             <button class="ghost header-action" data-action="logout">Sair</button>
           </div>
         </header>
@@ -530,7 +539,6 @@ function render() {
                 <span>${escape(state.user.email || state.user.uid)}</span>
               </div>
             </div>
-            <div class="toolbar-caption">${escape(APP_TAGLINE)}</div>
           </div>
         </section>
 
@@ -559,7 +567,6 @@ function renderLogin() {
         <span class="login-kicker">Desenvolvido pelo DAGV</span>
         <div class="login-brand-lockup">
           <img class="login-brand-mark-image" src="./icon.png" alt="DAGV" />
-          <span class="login-brand-name">${APP_NAME}</span>
         </div>
         <h1>Sua rotina academica, mais simples.</h1>
         <p class="login-subtitle">Um app feito para simplificar a vida dos estudantes e desenvolvido pelo DA.</p>
@@ -585,7 +592,6 @@ function renderStartupFailure(error) {
         <span class="login-kicker">Painel do DAGV</span>
         <div class="login-brand-lockup">
           <img class="login-brand-mark-image" src="./icon.png" alt="DAGV" />
-          <span class="login-brand-name">${APP_NAME}</span>
         </div>
         <h1>Não conseguimos abrir o app agora.</h1>
         <p class="login-subtitle">Tente novamente em instantes ou siga pelo portal oficial do DAGV.</p>
@@ -760,16 +766,15 @@ function renderRegistrationPanel(registration) {
         </div>
       </section>
 
-      <section class="paper-card simple-section">
-        <div class="section-header-row">
-          <div>
-            <div class="section-topline">Arquivos</div>
-            <h2 class="section-title">Documentos vinculados</h2>
+        <section class="paper-card simple-section">
+          <div class="section-header-row">
+            <div>
+              <div class="section-topline">Arquivos</div>
+              <h2 class="section-title">Documentos vinculados</h2>
+            </div>
           </div>
-          <button class="ghost" data-action="refresh-uploads">Atualizar lista</button>
-        </div>
-        <div class="upload-list" style="margin-top: 1rem;">
-          ${scheduleUploads.length || studentCardUpload
+          <div class="upload-list" style="margin-top: 1rem;">
+            ${scheduleUploads.length || studentCardUpload
             ? [
                 ...scheduleUploads.map((item) => renderUploadItem(item, registration.scheduleUpload)),
                 ...getStudentCardUploads().map((item) => renderUploadItem(item, studentCardUpload)),
@@ -913,7 +918,6 @@ function renderPortalTab(activeUpload) {
             <div class="section-topline">${escape(titleMap[state.activeTab] || "Portal DAGV")}</div>
             <h2 class="section-title">${escape(titleMap[state.activeTab] || "Portal DAGV")}</h2>
           </div>
-          <button class="ghost" data-action="refresh-portal-tab" data-tab="${escapeAttribute(state.activeTab)}">${state.portalLoadingTab === state.activeTab ? "Atualizando..." : "Atualizar conteúdo"}</button>
         </div>
         <p class="section-copy">${escape(descriptionMap[state.activeTab] || "Conteúdo do DAGV carregado dentro do aplicativo.")}</p>
         ${state.portalError && state.portalLoadingTab !== state.activeTab ? `<div class="toast is-warning" style="margin-top: 1rem;">${escape(state.portalError)}</div>` : ""}
@@ -923,7 +927,7 @@ function renderPortalTab(activeUpload) {
         ? `<div class="empty-state">Carregando o conteúdo atualizado do DAGV...</div>`
         : pages.length
           ? `<section class="section-stack">${pages.map(renderPortalPage).join("")}</section>`
-          : `<div class="empty-state">Ainda não consegui carregar o conteúdo desta aba. Toque em atualizar para tentar novamente.</div>`}
+          : `<div class="empty-state">Ainda não consegui carregar o conteúdo desta aba agora.</div>`}
     </section>
   `;
 }
@@ -973,7 +977,6 @@ function renderAcademicPanel(activeUpload) {
               <div class="section-topline">Restaurante</div>
               <h2 class="section-title">Unidade Abadia</h2>
             </div>
-            <button class="ghost" data-action="sync-ru">Atualizar</button>
           </div>
           <div class="menu-grid simple-menu-grid" style="margin-top: 1rem;">
             ${state.menu.map(renderMenuCard).join("")}
@@ -1035,13 +1038,15 @@ function renderAgendaHeader(title) {
 }
 
 function renderUploadStatus() {
+  if (!shouldShowUploadStatusPanel()) {
+    return "";
+  }
+
   const classes = ["toast"];
-  const message = state.uploadError || state.uploadMessage || "Nenhum envio em andamento.";
+  const message = state.uploadError || state.uploadMessage || "";
 
   if (state.uploadError) {
     classes.push("is-danger");
-  } else if (!state.uploadMessage) {
-    classes.push("is-warning");
   }
 
   return `
@@ -1311,8 +1316,7 @@ function getScreenTitle() {
 function renderStatusBanner(registration = getRegistrationState()) {
   const message = state.uploadError
     || state.authError
-    || (!registration.isComplete ? buildRegistrationBannerMessage(registration) : "")
-    || (state.uploadProgress > 0 ? state.uploadMessage : "");
+    || (!registration.isComplete ? buildRegistrationBannerMessage(registration) : "");
   if (!message) {
     return "";
   }
@@ -1334,6 +1338,14 @@ function renderHomeShortcut(iconName, label, action, tab) {
       <span class="quick-button-label">${escape(label)}</span>
     </button>
   `;
+}
+
+function shouldShowUploadStatusPanel() {
+  if (state.uploadError) {
+    return true;
+  }
+
+  return state.uploadProgress > 0 && state.uploadProgress < 100;
 }
 
 function renderSimpleInfoRow(label, value) {
@@ -1408,6 +1420,7 @@ async function onClick(event) {
   if (!button) return;
 
   const action = button.dataset.action;
+  maybePromptForClassNotifications(action);
 
   if (action === "toggle-sidebar") {
     setState({ sidebarOpen: !state.sidebarOpen });
@@ -2141,6 +2154,25 @@ async function refreshRuMenu(silent) {
   }
 }
 
+function refreshRuMenuIfNeeded(silent = true) {
+  if (shouldRefreshRuMenu()) {
+    void refreshRuMenu(silent);
+  }
+}
+
+function shouldRefreshRuMenu() {
+  if (!state.lastMenuSync) {
+    return true;
+  }
+
+  const lastSyncTime = new Date(state.lastMenuSync).getTime();
+  if (!Number.isFinite(lastSyncTime)) {
+    return true;
+  }
+
+  return (Date.now() - lastSyncTime) >= MENU_AUTO_REFRESH_MS;
+}
+
 function buildHeroTitle(activeUpload, academicData, todayClasses, nextClass) {
   const name = firstName(academicData?.profile?.studentName || state.user?.displayName || state.user?.email || "Aluno");
   if (!activeUpload) {
@@ -2342,6 +2374,286 @@ function closeDocumentViewer() {
   });
 }
 
+function supportsClassNotifications() {
+  return typeof window !== "undefined"
+    && "Notification" in window
+    && "serviceWorker" in navigator;
+}
+
+async function registerNotificationServiceWorker() {
+  if (!supportsClassNotifications()) {
+    return null;
+  }
+
+  if (notificationServiceWorkerRegistration) {
+    return notificationServiceWorkerRegistration;
+  }
+
+  try {
+    notificationServiceWorkerRegistration = await navigator.serviceWorker.register("./service-worker.js");
+    syncClassNotifications();
+    return notificationServiceWorkerRegistration;
+  } catch (error) {
+    return null;
+  }
+}
+
+function maybePromptForClassNotifications(action) {
+  if (!supportsClassNotifications()) {
+    return;
+  }
+
+  if (!state.user || !hasCompletedRegistration(state.uploads, state.profile)) {
+    return;
+  }
+
+  if (Notification.permission !== "default") {
+    return;
+  }
+
+  if (hasNotificationPromptBeenAttempted()) {
+    return;
+  }
+
+  if (["close-sidebar", "toggle-sidebar", "logout", "reload-app"].includes(action)) {
+    return;
+  }
+
+  rememberNotificationPromptAttempt();
+  void requestClassNotificationPermission();
+}
+
+async function requestClassNotificationPermission() {
+  if (!supportsClassNotifications() || Notification.permission !== "default") {
+    return Notification.permission;
+  }
+
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      await registerNotificationServiceWorker();
+      syncClassNotifications();
+    }
+    return permission;
+  } catch (error) {
+    return "default";
+  }
+}
+
+function syncClassNotifications() {
+  clearClassNotificationTimer();
+
+  if (!supportsClassNotifications() || Notification.permission !== "granted" || !state.user) {
+    stopClassNotificationHeartbeat();
+    return;
+  }
+
+  const activeUpload = getActiveUpload();
+  const schedule = getAcademicData(activeUpload)?.schedule || [];
+  if (!schedule.length) {
+    stopClassNotificationHeartbeat();
+    return;
+  }
+
+  startClassNotificationHeartbeat();
+  const nextReminder = getNextClassReminder(schedule, activeUpload?.id || "");
+  if (!nextReminder) {
+    return;
+  }
+
+  scheduledReminderKey = nextReminder.key;
+  classNotificationTimerId = window.setTimeout(() => {
+    classNotificationTimerId = 0;
+    scheduledReminderKey = "";
+    void fireClassReminderNotification(nextReminder);
+  }, nextReminder.delayMs);
+}
+
+function clearClassNotificationTimer() {
+  if (classNotificationTimerId) {
+    window.clearTimeout(classNotificationTimerId);
+    classNotificationTimerId = 0;
+  }
+  scheduledReminderKey = "";
+}
+
+function startClassNotificationHeartbeat() {
+  if (classNotificationHeartbeatId) {
+    return;
+  }
+
+  classNotificationHeartbeatId = window.setInterval(() => {
+    syncClassNotifications();
+  }, 60 * 1000);
+}
+
+function stopClassNotificationHeartbeat() {
+  if (classNotificationHeartbeatId) {
+    window.clearInterval(classNotificationHeartbeatId);
+    classNotificationHeartbeatId = 0;
+  }
+}
+
+function getNextClassReminder(schedule, uploadId) {
+  const reminders = listUpcomingClassReminders(schedule, uploadId);
+  return reminders.find((item) => !hasReminderBeenShown(item.key)) || null;
+}
+
+function listUpcomingClassReminders(schedule, uploadId) {
+  const reminders = [];
+  const now = Date.now();
+  const today = new Date();
+  const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+
+  for (let offset = 0; offset <= NOTIFICATION_LOOKAHEAD_DAYS; offset += 1) {
+    const day = addDays(startOfToday, offset);
+    const isoDate = toISO(day);
+    const classes = getClassesForDate(schedule, isoDate);
+
+    for (const classItem of classes) {
+      const startAt = combineIsoDateAndTime(isoDate, classItem.startTime);
+      if (!startAt || Number.isNaN(startAt.getTime()) || startAt.getTime() <= now) {
+        continue;
+      }
+
+      const rawNotifyAt = startAt.getTime() - (CLASS_NOTIFICATION_LEAD_MINUTES * 60 * 1000);
+      const notifyAt = rawNotifyAt <= now ? now + 1000 : rawNotifyAt;
+      const key = buildClassReminderKey(uploadId, isoDate, classItem);
+
+      reminders.push({
+        key,
+        title: classItem.title || "Aula",
+        group: classItem.group || "",
+        teacher: classItem.teacher || "",
+        startTime: classItem.startTime || "",
+        startAt,
+        isoDate,
+        delayMs: Math.max(0, notifyAt - now),
+      });
+    }
+  }
+
+  return reminders.sort((left, right) => left.delayMs - right.delayMs);
+}
+
+function buildClassReminderKey(uploadId, isoDate, classItem) {
+  return [
+    uploadId || "schedule",
+    isoDate,
+    classItem?.startTime || "",
+    classItem?.title || "aula",
+    classItem?.group || "",
+  ].join("|");
+}
+
+function combineIsoDateAndTime(isoDate, time) {
+  const [year, month, day] = String(isoDate || "").split("-").map(Number);
+  const [hours, minutes] = String(time || "").split(":").map(Number);
+
+  if (!year || !month || !day || !Number.isFinite(hours) || !Number.isFinite(minutes)) {
+    return null;
+  }
+
+  return new Date(year, month - 1, day, hours, minutes, 0, 0);
+}
+
+async function fireClassReminderNotification(reminder) {
+  if (!supportsClassNotifications() || Notification.permission !== "granted") {
+    return;
+  }
+
+  if (hasReminderBeenShown(reminder.key)) {
+    syncClassNotifications();
+    return;
+  }
+
+  rememberReminderShown(reminder.key, reminder.startAt);
+  const bodyParts = [
+    `Sua aula ${reminder.title} comeca as ${reminder.startTime}.`,
+    reminder.group ? `Turma ${reminder.group}.` : "",
+  ].filter(Boolean);
+
+  try {
+    const registration = await registerNotificationServiceWorker();
+    if (registration?.showNotification) {
+      await registration.showNotification("Aula em 10 minutos", {
+        body: bodyParts.join(" "),
+        icon: "./icon.png",
+        badge: "./icon.png",
+        tag: reminder.key,
+        renotify: false,
+        data: {
+          path: "/",
+          section: "academic",
+        },
+      });
+    } else {
+      const notification = new Notification("Aula em 10 minutos", {
+        body: bodyParts.join(" "),
+        icon: "./icon.png",
+        tag: reminder.key,
+      });
+      window.setTimeout(() => notification.close(), 12000);
+    }
+  } catch (error) {
+    // Se falhar, evitamos interromper o app.
+  } finally {
+    syncClassNotifications();
+  }
+}
+
+function hasNotificationPromptBeenAttempted() {
+  try {
+    return Boolean(localStorage.getItem(NOTIFICATION_PROMPT_STORAGE_KEY));
+  } catch (error) {
+    return true;
+  }
+}
+
+function rememberNotificationPromptAttempt() {
+  try {
+    localStorage.setItem(NOTIFICATION_PROMPT_STORAGE_KEY, new Date().toISOString());
+  } catch (error) {
+    // Ignoramos falhas de armazenamento do prompt.
+  }
+}
+
+function readReminderHistory() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(NOTIFICATION_HISTORY_STORAGE_KEY) || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    return [];
+  }
+}
+
+function writeReminderHistory(items) {
+  try {
+    localStorage.setItem(NOTIFICATION_HISTORY_STORAGE_KEY, JSON.stringify(items.slice(-160)));
+  } catch (error) {
+    // Ignoramos falhas de armazenamento da fila local.
+  }
+}
+
+function hasReminderBeenShown(reminderKey) {
+  const now = Date.now();
+  const history = readReminderHistory().filter((item) => Number(item?.expiresAt || 0) > now);
+  if (history.length) {
+    writeReminderHistory(history);
+  }
+  return history.some((item) => item.key === reminderKey);
+}
+
+function rememberReminderShown(reminderKey, startAt) {
+  const now = Date.now();
+  const history = readReminderHistory().filter((item) => Number(item?.expiresAt || 0) > now);
+  history.push({
+    key: reminderKey,
+    expiresAt: new Date(startAt.getTime() + (24 * 60 * 60 * 1000)).getTime(),
+  });
+  writeReminderHistory(history);
+}
+
 function timestampToIso(value) {
   if (!value) return "";
   if (typeof value === "string") return value;
@@ -2501,6 +2813,7 @@ function setState(patch, options = {}) {
   if (shouldRender) {
     render();
   }
+  syncClassNotifications();
 }
 
 function getTransientUploadsForUser(ownerUid) {

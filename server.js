@@ -13,6 +13,7 @@ const cspDirectives = [
   "form-action 'self'",
   "script-src 'self' https://esm.sh",
   "style-src 'self' 'unsafe-inline'",
+  "worker-src 'self' blob:",
   "img-src 'self' data: blob: https://dagvmeduftm.wordpress.com https://*.wordpress.com https://*.wp.com https://*.supabase.co",
   "frame-src 'self' blob:",
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
