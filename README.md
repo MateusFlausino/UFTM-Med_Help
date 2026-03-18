@@ -4,48 +4,50 @@ Painel web do DAGV voltado aos estudantes de Medicina, preparado para reunir hor
 
 ## O que já está pronto
 
-- conta do aluno com email e senha via Firebase Authentication;
-- upload do PDF real do SCA para o Firebase Storage;
-- metadados do aluno e dados extraídos salvos no Cloud Firestore;
+- conta do aluno com login Google via Supabase Auth;
+- upload do PDF real do SCA para o Supabase Storage;
+- metadados do aluno e dados extraídos salvos no Postgres da Supabase;
 - escolha de um PDF ativo por conta;
 - cardápio do dia da Unidade Abadia via rota `/api/ru-abadia`;
 - interface pronta para deploy estático na Vercel.
 
 ## Como funciona o modo online
 
-1. O aluno cria a conta com nome, e-mail e senha.
-2. O Firebase Authentication guarda a senha da conta.
-3. O PDF oficial do SCA é lido no navegador e enviado para o Firebase Storage.
-4. O app salva no Firestore o perfil, o PDF ativo e os dados extraídos do arquivo.
+1. O aluno entra com a conta Google.
+2. O Supabase Auth gerencia a sessão do navegador.
+3. O PDF oficial do SCA é lido no navegador e enviado para o bucket privado `student-pdfs`.
+4. O app salva em `profiles` e `uploads` o perfil, o PDF ativo e os dados extraídos do arquivo.
 5. A mesma conta pode acessar os PDFs e a agenda em outros aparelhos.
 
 ## Limitações desta alternativa
 
 - o reconhecimento depende do PDF oficial do SCA em formato textual;
-- o Firebase Storage precisa estar habilitado no projeto;
-- se o Storage do Firebase não estiver configurado, o login funciona, mas o envio do PDF falha.
+- é preciso configurar o provider Google na Supabase e no Google Cloud;
+- o bucket privado e as policies do Storage precisam existir no projeto.
 
 ## Estrutura principal
 
 - [index.html](C:/Users/flaus/Downloads/UFTM%20medmbile/index.html): entrada da aplicação
-- [app.local.js](C:/Users/flaus/Downloads/UFTM%20medmbile/app.local.js): fluxo online do aluno, autenticação e uploads do PDF
+- [app.local.js](C:/Users/flaus/Downloads/UFTM%20medmbile/app.local.js): fluxo online do aluno, autenticação Google e uploads do PDF
+- [supabase-config.js](C:/Users/flaus/Downloads/UFTM%20medmbile/supabase-config.js): URL, chave pública e bucket do projeto Supabase
+- [supabase/schema.sql](C:/Users/flaus/Downloads/UFTM%20medmbile/supabase/schema.sql): tabelas, RLS e policies do Storage
 - [app.js](C:/Users/flaus/Downloads/UFTM%20medmbile/app.js): implementação anterior do projeto
 - [styles.css](C:/Users/flaus/Downloads/UFTM%20medmbile/styles.css): identidade visual
 - [api/ru-abadia.js](C:/Users/flaus/Downloads/UFTM%20medmbile/api/ru-abadia.js): endpoint do cardápio RU
 - [ru-abadia.js](C:/Users/flaus/Downloads/UFTM%20medmbile/ru-abadia.js): extração do cardápio oficial
 
-## Configuração do Firebase
+## Configuração do Supabase
 
-1. Em `Authentication > Sign-in method`, habilite `Email/Password`.
-2. Em `Authentication > Settings > Authorized domains`, adicione o domínio local e o de produção.
-3. Crie um banco do `Cloud Firestore`.
-4. Habilite o `Firebase Storage`.
-5. Publique as regras de [firestore.rules](C:/Users/flaus/Downloads/UFTM%20medmbile/firestore.rules) e [storage.rules](C:/Users/flaus/Downloads/UFTM%20medmbile/storage.rules).
-6. Preencha o arquivo [firebase-config.js](C:/Users/flaus/Downloads/UFTM%20medmbile/firebase-config.js) com as credenciais do projeto.
+1. Crie um projeto na Supabase.
+2. Em `Authentication > URL Configuration`, adicione `http://localhost:4173/**` e a URL de produção.
+3. Em `Authentication > Providers > Google`, habilite o provider e preencha `Client ID` e `Client Secret`.
+4. No Google Cloud Console, adicione o callback `https://<project-ref>.supabase.co/auth/v1/callback` em `Authorized redirect URIs`.
+5. Rode o SQL de [supabase/schema.sql](C:/Users/flaus/Downloads/UFTM%20medmbile/supabase/schema.sql) no `SQL Editor`.
+6. Preencha o arquivo [supabase-config.js](C:/Users/flaus/Downloads/UFTM%20medmbile/supabase-config.js) com a `Project URL` e a `Publishable Key`.
 
 ## Observação importante sobre custo
 
-O app usa Firebase porque o projeto já estava estruturado nele. Porém o Cloud Storage for Firebase passou a exigir projeto no plano Blaze para manter o bucket padrão ativo, mesmo quando o uso fica dentro da faixa sem cobrança. Se você quiser uma opção estritamente gratuita sem billing account, o caminho mais alinhado é migrar para Supabase.
+Esta versão foi ajustada para Supabase porque o fluxo de login Google e bucket privado cabe melhor na faixa gratuita para este projeto.
 
 ## Rodar localmente
 
@@ -71,6 +73,6 @@ O projeto continua compatível com deploy simples na Vercel.
 Os próximos avanços técnicos mais úteis agora são:
 
 - mover a extração do PDF para um worker/backend dedicado;
-- adicionar recuperação de senha e verificação de e-mail na interface;
-- monitorar uso de Storage e decidir entre Firebase Blaze ou migração para Supabase;
+- adicionar remoção de PDF e limpeza do bucket direto pela interface;
+- monitorar uso de Storage e ajustar limites do bucket;
 - ampliar a leitura para novos formatos de relatório acadêmico.

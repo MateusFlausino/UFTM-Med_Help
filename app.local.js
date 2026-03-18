@@ -1,35 +1,12 @@
 import { extractScaPdfData } from "./sca-parser.js";
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
-import {
-  createUserWithEmailAndPassword,
-  getAuth,
-  onAuthStateChanged,
-  sendPasswordResetEmail,
-  signInWithEmailAndPassword,
-  signOut,
-  updateProfile,
-} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
-import {
-  collection,
-  doc,
-  getFirestore,
-  onSnapshot,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
-import {
-  getDownloadURL,
-  getStorage,
-  ref as storageRef,
-  uploadBytesResumable,
-} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2?bundle";
 
 const APP_NAME = "Agenda DAGV";
 const APP_MARK = "DAGV";
 const APP_TAGLINE = "Horários, RU e SCA no espaço do DA";
 const DA_PORTAL_URL = "https://dagvmeduftm.wordpress.com/";
+const SUPABASE_CONFIG_FILE = "supabase-config.js";
+const SUPABASE_BUCKET = "student-pdfs";
 
 const UI_STORAGE_KEY = "uftm-mobile-local-ui-v1";
 const SESSION_STORAGE_KEY = "uftm-mobile-local-session-v1";
@@ -118,19 +95,15 @@ const defaultMenu = [
 
 const appElement = document.getElementById("app");
 const uiState = loadUiState();
-const firebaseConfig = window.UFTM_FIREBASE_CONFIG || {};
-const firebaseReady = hasFirebaseConfig(firebaseConfig);
-const canUseFirebaseAuth = window.location.protocol !== "file:";
+const supabaseConfig = window.UFTM_SUPABASE_CONFIG || {};
+const supabaseReady = hasSupabaseConfig(supabaseConfig);
+const canUseGoogleAuth = window.location.protocol !== "file:";
 const services = {
-  firebaseApp: null,
-  auth: null,
-  db: null,
-  storage: null,
+  supabase: null,
 };
 let localDbPromise = null;
 let persistentUploadsIssue = "";
-let unsubscribeProfile = null;
-let unsubscribeUploads = null;
+let authSubscription = null;
 
 let state = {
   activeTab: uiState.activeTab || "home",
@@ -139,11 +112,10 @@ let state = {
   menu: Array.isArray(uiState.menu) && uiState.menu.length ? uiState.menu : defaultMenu,
   lastMenuSync: uiState.lastMenuSync || "",
   syncMessage: uiState.syncMessage || "Buscando o cardápio da Abadia para o painel do DA.",
-  firebaseReady,
-  canUseFirebaseAuth,
-  authChecking: firebaseReady && canUseFirebaseAuth,
+  supabaseReady,
+  canUseGoogleAuth,
+  authChecking: supabaseReady && canUseGoogleAuth,
   authError: "",
-  authMode: uiState.authMode || "signin",
   user: null,
   profile: null,
   uploads: [],
@@ -151,9 +123,6 @@ let state = {
   uploadError: "",
   uploadProgress: 0,
   openingUploadId: "",
-  draftName: uiState.draftName || "",
-  draftEmail: uiState.draftEmail || "",
-  draftPassword: "",
   portalContent: {},
   newsFeed: [],
   portalLoadingTab: "",
@@ -165,7 +134,7 @@ appElement.addEventListener("change", onChange);
 appElement.addEventListener("input", onInput);
 
 init().catch((error) => {
-  console.error("Falha ao iniciar o painel online do DAGV.", error);
+  console.error("Falha ao iniciar o painel do DAGV com Supabase.", error);
   appElement.innerHTML = renderStartupFailure(error);
 });
 
@@ -174,160 +143,294 @@ async function init() {
   loadPortalTab("home", true);
   refreshRuMenu(true);
 
-  if (!firebaseReady) {
+  if (!supabaseReady) {
     setState({
       authChecking: false,
-      authError: "Preencha o arquivo firebase-config.js para habilitar login com email/senha e PDFs privados na nuvem.",
+      authError: `Preencha o arquivo ${SUPABASE_CONFIG_FILE} para habilitar login Google e PDFs privados na nuvem.`,
     });
     return;
   }
 
-  if (!canUseFirebaseAuth) {
+  if (!canUseGoogleAuth) {
     setState({
       authChecking: false,
-      authError: "Abra o app em http://localhost:4173 ou no deploy para autenticar com email e senha.",
+      authError: "Abra o app em http://localhost:4173 ou no deploy para autenticar com Google.",
     });
     return;
   }
 
   try {
-    services.firebaseApp = initializeApp(firebaseConfig);
-    services.auth = getAuth(services.firebaseApp);
-    services.db = getFirestore(services.firebaseApp);
-    services.storage = getStorage(services.firebaseApp);
-    onAuthStateChanged(services.auth, handleAuthStateChange);
+    services.supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey, {
+      auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true,
+        flowType: "pkce",
+      },
+    });
+
+    if (authSubscription) {
+      authSubscription.unsubscribe();
+      authSubscription = null;
+    }
+
+    const { data } = services.supabase.auth.onAuthStateChange((_event, session) => {
+      window.setTimeout(() => {
+        void handleSupabaseSession(session);
+      }, 0);
+    });
+
+    authSubscription = data.subscription;
+
+    const { data: sessionData, error } = await services.supabase.auth.getSession();
+    if (error) {
+      throw error;
+    }
+
+    await handleSupabaseSession(sessionData.session);
   } catch (error) {
     setState({
       authChecking: false,
-      authError: `Não consegui inicializar a conta online: ${describeFirebaseError(error)}`,
+      authError: `Não consegui inicializar a conta online: ${describeSupabaseError(error)}`,
     });
   }
 }
 
-async function handleAuthStateChange(user) {
-  stopUserSubscriptions();
+async function handleSupabaseSession(session) {
+  const user = session?.user || null;
 
   if (!user) {
     setState({
       authChecking: false,
+      authError: "",
       user: null,
       profile: null,
       uploads: [],
       uploadMessage: "",
       uploadError: "",
-      draftPassword: "",
+      uploadProgress: 0,
+      openingUploadId: "",
+      activeTab: "home",
+      agendaTab: "today",
     });
     return;
   }
 
-  const userData = {
-    uid: user.uid,
-    displayName: user.displayName || "",
-    email: user.email || "",
-    photoURL: user.photoURL || "",
-    provider: "firebase-email-password",
-  };
+  const userData = normalizeSupabaseUser(user);
 
   setState({
     authChecking: false,
     authError: "",
     user: userData,
-    profile: null,
+    profile: {
+      uid: userData.uid,
+      displayName: userData.displayName,
+      email: userData.email,
+      photoURL: userData.photoURL,
+      activeUploadId: "",
+      activeUploadName: "",
+    },
     uploads: [],
-    draftPassword: "",
     uploadError: "",
-    uploadMessage: "Conta conectada com sucesso.",
+    uploadMessage: "Conta Google conectada com sucesso.",
   });
 
   try {
-    await setDoc(
-      doc(services.db, "users", user.uid),
-      {
-        displayName: user.displayName || state.draftName || "",
-        email: user.email || "",
-        photoURL: user.photoURL || "",
-        lastLoginAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        createdAt: serverTimestamp(),
+    await upsertSupabaseProfile(userData);
+    const { profile, uploads } = await loadRemoteAccountData(userData.uid);
+
+    setState({
+      authChecking: false,
+      authError: "",
+      user: {
+        ...userData,
+        displayName: profile.displayName || userData.displayName || userData.email || "Aluno",
+        email: profile.email || userData.email || "",
+        photoURL: profile.photoURL || userData.photoURL || "",
       },
-      { merge: true },
-    );
+      profile,
+      uploads,
+      activeTab: uploads.length ? state.activeTab : "academic",
+      agendaTab: uploads.length ? state.agendaTab : "sca",
+      uploadError: "",
+      uploadMessage: uploads.length
+        ? "Conta conectada. Seus PDFs privados foram sincronizados."
+        : "Conta conectada. Envie o primeiro PDF do SCA para montar a agenda.",
+    });
   } catch (error) {
     setState({
-      uploadError: `Não consegui sincronizar o perfil do aluno: ${describeFirebaseError(error)}`,
+      authChecking: false,
+      uploadError: `Não consegui sincronizar o perfil do aluno: ${describeSupabaseError(error)}`,
       uploadMessage: "",
     });
   }
+}
 
-  unsubscribeProfile = onSnapshot(
-    doc(services.db, "users", user.uid),
-    (snapshot) => {
-      const profile = snapshot.exists() ? { uid: user.uid, ...snapshot.data() } : { uid: user.uid };
-      setState({
-        profile,
-        user: {
+async function upsertSupabaseProfile(userData, extra = {}) {
+  if (!services.supabase) {
+    throw new Error("cliente Supabase indisponível");
+  }
+
+  const now = new Date().toISOString();
+  const payload = {
+    id: userData.uid,
+    display_name: userData.displayName || "",
+    email: userData.email || "",
+    photo_url: userData.photoURL || "",
+    last_login_at: now,
+    updated_at: now,
+    ...extra,
+  };
+
+  const { error } = await services.supabase
+    .from("profiles")
+    .upsert(payload, { onConflict: "id" });
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function loadRemoteAccountData(userUid) {
+  if (!services.supabase) {
+    throw new Error("cliente Supabase indisponível");
+  }
+
+  const [profileResult, uploadsResult] = await Promise.all([
+    services.supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", userUid)
+      .maybeSingle(),
+    services.supabase
+      .from("uploads")
+      .select("*")
+      .eq("owner_uid", userUid)
+      .order("uploaded_at_client", { ascending: false }),
+  ]);
+
+  if (profileResult.error) {
+    throw profileResult.error;
+  }
+
+  if (uploadsResult.error) {
+    throw uploadsResult.error;
+  }
+
+  return {
+    profile: normalizeSupabaseProfileRow(profileResult.data, userUid),
+    uploads: (uploadsResult.data || []).map(normalizeSupabaseUploadRow),
+  };
+}
+
+async function reloadRemoteAccountData(userUid) {
+  const { profile, uploads } = await loadRemoteAccountData(userUid);
+  const activeUpload = uploads.find((item) => item.id === profile.activeUploadId) || uploads[0] || null;
+  const academicData = getAcademicData(activeUpload);
+
+  setState({
+    user: state.user
+      ? {
           ...state.user,
-          displayName: profile.displayName || user.displayName || user.email || "Aluno",
-          email: profile.email || user.email || "",
-          photoURL: profile.photoURL || user.photoURL || "",
-        },
-      });
-    },
-    (error) => {
-      setState({
-        uploadError: `Não consegui carregar o perfil salvo: ${describeFirebaseError(error)}`,
-        uploadMessage: "",
-      });
-    },
-  );
+          displayName: profile.displayName || state.user.displayName || state.user.email || "Aluno",
+          email: profile.email || state.user.email || "",
+          photoURL: profile.photoURL || state.user.photoURL || "",
+        }
+      : state.user,
+    profile,
+    uploads,
+    activeTab: uploads.length ? state.activeTab : "academic",
+    agendaTab: uploads.length ? state.agendaTab : "sca",
+    referenceDate: academicData?.schedule?.length
+      ? suggestReferenceDate(academicData.schedule, state.referenceDate)
+      : state.referenceDate,
+  });
 
-  unsubscribeUploads = onSnapshot(
-    query(collection(services.db, "users", user.uid, "uploads"), orderBy("uploadedAtClient", "desc")),
-    (snapshot) => {
-      const uploads = snapshot.docs.map((item) => {
-        const data = item.data();
-        return {
-          id: item.id,
-          ownerUid: data.ownerUid || user.uid,
-          originalName: data.originalName || "PDF sem nome",
-          normalizedName: data.normalizedName || "",
-          storagePath: data.storagePath || "",
-          size: Number(data.size || 0),
-          contentType: data.contentType || "application/pdf",
-          status: data.status || "uploaded",
-          parserStatus: data.parserStatus || "",
-          uploadedAtClient: data.uploadedAtClient || "",
-          updatedAt: timestampToIso(data.updatedAt) || data.uploadedAtClient || "",
-          notes: data.notes || "",
-          academicData: data.academicData || null,
-        };
-      });
+  return { profile, uploads };
+}
 
-      setState({
-        uploads,
-        activeTab: uploads.length ? state.activeTab : "academic",
-        agendaTab: uploads.length ? state.agendaTab : "sca",
-      });
-    },
-    (error) => {
-      setState({
-        uploadError: `Não consegui carregar os PDFs desta conta: ${describeFirebaseError(error)}`,
-        uploadMessage: "",
-      });
-    },
-  );
+async function upsertUploadRow(upload) {
+  if (!services.supabase) {
+    throw new Error("cliente Supabase indisponível");
+  }
+
+  const now = new Date().toISOString();
+  const { error } = await services.supabase
+    .from("uploads")
+    .upsert({
+      id: upload.id,
+      owner_uid: upload.ownerUid,
+      original_name: upload.originalName,
+      normalized_name: upload.normalizedName,
+      storage_path: upload.storagePath,
+      size: Number(upload.size || 0),
+      content_type: upload.contentType || "application/pdf",
+      status: upload.status || "uploaded",
+      parser_status: upload.parserStatus || "",
+      uploaded_at_client: upload.uploadedAtClient || now,
+      updated_at: now,
+      notes: upload.notes || "",
+      academic_data: upload.academicData || null,
+    }, { onConflict: "id" });
+
+  if (error) {
+    throw error;
+  }
+}
+
+function getSupabaseBucketName() {
+  return String(supabaseConfig.bucket || SUPABASE_BUCKET || "").trim() || SUPABASE_BUCKET;
+}
+
+function normalizeSupabaseUser(user) {
+  const metadata = user?.user_metadata || {};
+  return {
+    uid: String(user?.id || ""),
+    displayName: normalizePersonName(metadata.full_name || metadata.name || user?.email || "Aluno"),
+    email: normalizeEmail(user?.email || metadata.email || ""),
+    photoURL: String(metadata.avatar_url || metadata.picture || ""),
+    provider: Array.isArray(user?.app_metadata?.providers) && user.app_metadata.providers.length
+      ? user.app_metadata.providers.join(",")
+      : "google",
+  };
+}
+
+function normalizeSupabaseProfileRow(row, fallbackUid = "") {
+  return {
+    uid: String(row?.id || fallbackUid || ""),
+    displayName: normalizePersonName(row?.display_name || ""),
+    email: normalizeEmail(row?.email || ""),
+    photoURL: String(row?.photo_url || ""),
+    activeUploadId: String(row?.active_upload_id || ""),
+    activeUploadName: String(row?.active_upload_name || ""),
+    lastUploadAtClient: String(row?.last_upload_at_client || ""),
+    lastLoginAt: String(row?.last_login_at || ""),
+    createdAt: String(row?.created_at || ""),
+    updatedAt: String(row?.updated_at || ""),
+  };
+}
+
+function normalizeSupabaseUploadRow(row) {
+  return {
+    id: String(row?.id || ""),
+    ownerUid: String(row?.owner_uid || ""),
+    originalName: String(row?.original_name || "PDF sem nome"),
+    normalizedName: String(row?.normalized_name || ""),
+    storagePath: String(row?.storage_path || ""),
+    size: Number(row?.size || 0),
+    contentType: String(row?.content_type || "application/pdf"),
+    status: String(row?.status || "uploaded"),
+    parserStatus: String(row?.parser_status || ""),
+    uploadedAtClient: String(row?.uploaded_at_client || ""),
+    updatedAt: String(row?.updated_at || row?.uploaded_at_client || ""),
+    createdAt: String(row?.created_at || ""),
+    notes: String(row?.notes || ""),
+    academicData: row?.academic_data || null,
+  };
 }
 
 function stopUserSubscriptions() {
-  if (typeof unsubscribeProfile === "function") {
-    unsubscribeProfile();
-    unsubscribeProfile = null;
-  }
-
-  if (typeof unsubscribeUploads === "function") {
-    unsubscribeUploads();
-    unsubscribeUploads = null;
-  }
+  return;
 }
 
 function render() {
@@ -413,58 +516,32 @@ function render() {
 }
 
 function renderLogin() {
-  const canLogin = !state.authChecking && state.firebaseReady && state.canUseFirebaseAuth;
-  const isSignup = state.authMode === "signup";
-  const loginLabel = state.authChecking
-    ? (isSignup ? "Criando conta..." : "Entrando...")
-    : (isSignup ? "Criar conta" : "Entrar com email");
-  const setupTitle = !state.firebaseReady
-    ? "Configure o Firebase para habilitar conta online, PDFs privados e agenda sincronizada."
-    : !state.canUseFirebaseAuth
-      ? "Abra o app em http://localhost:4173 ou no deploy para usar autenticação com email e senha."
-      : isSignup
-        ? "Crie uma conta do aluno para guardar PDFs do SCA na nuvem e acessar de qualquer aparelho."
-        : "Entre com email e senha para acessar seus PDFs e a agenda acadêmica em qualquer aparelho.";
+  const canLogin = !state.authChecking && state.supabaseReady && state.canUseGoogleAuth;
+  const loginLabel = state.authChecking ? "Conectando..." : "Entrar com Google";
+  const setupTitle = !state.supabaseReady
+    ? `Configure o arquivo ${SUPABASE_CONFIG_FILE} para habilitar login Google e PDFs privados na nuvem.`
+    : !state.canUseGoogleAuth
+      ? "Abra o app em http://localhost:4173 ou no deploy para usar o login Google."
+      : "Entre com sua conta Google para guardar PDFs do SCA na nuvem e acessar a agenda em qualquer aparelho.";
 
   return `
     <div class="login-layout">
       <section class="login-card">
         <span class="eyebrow">Painel do DA</span>
-        <h1>${APP_NAME}, com login e PDFs privados na nuvem.</h1>
+        <h1>${APP_NAME}, com login Google e PDFs privados na nuvem.</h1>
         <p>${escape(setupTitle)}</p>
-        <div class="button-row" style="margin-top: 1rem;">
-          <button class="${isSignup ? "ghost" : "secondary"}" data-action="set-auth-mode" data-mode="signin">Entrar</button>
-          <button class="${isSignup ? "secondary" : "ghost"}" data-action="set-auth-mode" data-mode="signup">Criar conta</button>
-        </div>
-        <div class="form-grid">
-          ${isSignup ? `
-            <div class="inline-field">
-              <label for="loginName">Nome do aluno</label>
-              <input id="loginName" type="text" value="${escapeAttribute(state.draftName)}" placeholder="Ex.: Ana Elisa" />
-            </div>
-          ` : ""}
-          <div class="inline-field">
-            <label for="loginEmail">E-mail do aluno</label>
-            <input id="loginEmail" type="email" value="${escapeAttribute(state.draftEmail)}" placeholder="nome@uftm.edu.br" />
-          </div>
-          <div class="inline-field">
-            <label for="loginPassword">Senha</label>
-            <input id="loginPassword" type="password" value="${escapeAttribute(state.draftPassword)}" placeholder="mínimo de 6 caracteres" />
-          </div>
-        </div>
         <div class="login-actions" style="margin-top: 1rem;">
-          <button class="cta" data-action="submit-auth" ${canLogin ? "" : "disabled"}>${escape(loginLabel)}</button>
-          ${isSignup ? "" : `<button class="ghost" data-action="reset-password" ${canLogin ? "" : "disabled"}>Redefinir senha</button>`}
+          <button class="cta" data-action="login-google" ${canLogin ? "" : "disabled"}>${escape(loginLabel)}</button>
           <a class="ghost link-button" href="${escapeAttribute(DA_PORTAL_URL)}" target="_blank" rel="noreferrer">Portal do DA</a>
           <button class="ghost" data-action="sync-ru">Atualizar RU</button>
         </div>
         <div class="toast ${state.authError ? "is-warning" : ""}" style="margin-top: 1rem;">
-          ${escape(state.authError || state.syncMessage || "A senha fica no Firebase Authentication. Os PDFs privados ficam no Storage da sua conta.")}
+          ${escape(state.authError || state.syncMessage || "O login acontece pelo Google via Supabase Auth. Os PDFs privados ficam no Storage da sua conta.")}
         </div>
         <div class="facts-grid" style="margin-top: 1.25rem;">
-          <div class="fact"><strong>Conta online</strong><p>login com email e senha</p></div>
+          <div class="fact"><strong>Conta online</strong><p>login com Google</p></div>
           <div class="fact"><strong>Do DA</strong><p>marca e entrada centralizadas no diretório</p></div>
-          <div class="fact"><strong>PDF privado</strong><p>guardado na nuvem da conta</p></div>
+          <div class="fact"><strong>PDF privado</strong><p>guardado no bucket privado do aluno</p></div>
         </div>
       </section>
 
@@ -472,15 +549,15 @@ function renderLogin() {
         <span class="eyebrow">Identidade DAGV</span>
         <h2 class="preview-title">Horários, RU e SCA reunidos em um painel do DA.</h2>
         <p class="preview-copy">
-          O aluno entra com email e senha, envia o PDF real do SCA e acompanha agenda, semana e RU em uma interface pensada para o diretório acadêmico.
+          O aluno entra com Google, envia o PDF real do SCA e acompanha agenda, semana e RU em uma interface pensada para o diretório acadêmico.
         </p>
         <div class="pill-grid">
           <div class="preview-pill"><strong>Painel do DA</strong><span>atalho direto para o portal estudantil</span></div>
-          <div class="preview-pill"><strong>PDF privado</strong><span>armazenado no Firebase Storage</span></div>
+          <div class="preview-pill"><strong>PDF privado</strong><span>armazenado no Supabase Storage</span></div>
           <div class="preview-pill"><strong>Agenda real</strong><span>horários e disciplinas saem do SCA</span></div>
         </div>
         <div class="mini-stack">
-          <div class="mini-card"><small>Passo 1</small><strong>Entrar</strong><span>use email e senha do aluno</span></div>
+          <div class="mini-card"><small>Passo 1</small><strong>Entrar</strong><span>use sua conta Google</span></div>
           <div class="mini-card"><small>Passo 2</small><strong>Enviar PDF</strong><span>o arquivo fica salvo na conta</span></div>
           <div class="mini-card"><small>Passo 3</small><strong>Acompanhar o dia</strong><span>aulas e RU sincronizam após a leitura</span></div>
         </div>
@@ -1031,22 +1108,8 @@ async function onClick(event) {
     return;
   }
 
-  if (action === "set-auth-mode") {
-    setState({
-      authMode: button.dataset.mode === "signup" ? "signup" : "signin",
-      authError: "",
-      draftPassword: "",
-    });
-    return;
-  }
-
-  if (action === "submit-auth") {
-    submitAuth();
-    return;
-  }
-
-  if (action === "reset-password") {
-    resetPassword();
+  if (action === "login-google") {
+    loginWithGoogle();
     return;
   }
 
@@ -1061,7 +1124,7 @@ async function onClick(event) {
   }
 
   if (action === "refresh-uploads") {
-    refreshLocalUploads();
+    refreshRemoteUploads();
     return;
   }
 
@@ -1076,27 +1139,8 @@ async function onClick(event) {
 }
 
 function onInput(event) {
-  if (event.target.id === "loginName") {
-    setState({
-      draftName: event.target.value || "",
-      authError: "",
-    }, { render: false });
-    return;
-  }
-
-  if (event.target.id === "loginEmail") {
-    setState({
-      draftEmail: event.target.value || "",
-      authError: "",
-    }, { render: false });
-    return;
-  }
-
-  if (event.target.id === "loginPassword") {
-    setState({
-      draftPassword: event.target.value || "",
-      authError: "",
-    }, { render: false });
+  if (event.target.id && String(event.target.id).startsWith("login")) {
+    setState({ authError: "" }, { render: false });
   }
 }
 
@@ -1111,36 +1155,46 @@ function onChange(event) {
   }
 }
 
-async function submitAuth() {
+async function logout() {
+  if (!services.supabase) return;
+
+  try {
+    stopUserSubscriptions();
+    const { error } = await services.supabase.auth.signOut();
+    if (error) {
+      throw error;
+    }
+
+    setState({
+      authError: "",
+      uploadError: "",
+      uploadMessage: "",
+      uploadProgress: 0,
+      openingUploadId: "",
+      activeTab: "home",
+      agendaTab: "today",
+      syncMessage: "Sessão encerrada. Entre novamente para acessar seus PDFs.",
+    });
+  } catch (error) {
+    setState({ authError: `Não consegui encerrar a sessão: ${describeSupabaseError(error)}` });
+  }
+}
+
+async function loginWithGoogle() {
   if (state.authChecking) return;
 
-  if (!state.firebaseReady) {
-    setState({ authError: "Preencha firebase-config.js antes de criar contas online." });
+  if (!state.supabaseReady) {
+    setState({ authError: `Preencha ${SUPABASE_CONFIG_FILE} antes de usar o login Google.` });
     return;
   }
 
-  if (!state.canUseFirebaseAuth) {
-    setState({ authError: "Abra o app em http://localhost:4173 ou no deploy para autenticar com email e senha." });
+  if (!state.canUseGoogleAuth) {
+    setState({ authError: "Abra o app em http://localhost:4173 ou no deploy para autenticar com Google." });
     return;
   }
 
-  const displayName = normalizePersonName(state.draftName);
-  const email = normalizeEmail(state.draftEmail);
-  const password = String(state.draftPassword || "");
-  const isSignup = state.authMode === "signup";
-
-  if (isSignup && !displayName) {
-    setState({ authError: "Digite o nome do aluno para criar a conta." });
-    return;
-  }
-
-  if (!isLikelyEmail(email)) {
-    setState({ authError: "Digite um e-mail válido para a conta do aluno." });
-    return;
-  }
-
-  if (password.length < 6) {
-    setState({ authError: "A senha precisa ter pelo menos 6 caracteres." });
+  if (!services.supabase) {
+    setState({ authError: "O cliente do Supabase ainda não foi inicializado." });
     return;
   }
 
@@ -1148,111 +1202,65 @@ async function submitAuth() {
     authChecking: true,
     authError: "",
     uploadError: "",
-    uploadMessage: isSignup ? "Criando conta do aluno..." : "Entrando na conta do aluno...",
+    uploadMessage: "Redirecionando para o login Google...",
   });
 
   try {
-    if (isSignup) {
-      const credential = await createUserWithEmailAndPassword(services.auth, email, password);
+    const { data, error } = await services.supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: window.location.origin,
+        queryParams: { prompt: "select_account" },
+      },
+    });
 
-      if (displayName) {
-        await updateProfile(credential.user, { displayName });
-      }
+    if (error) {
+      throw error;
+    }
 
-      await setDoc(
-        doc(services.db, "users", credential.user.uid),
-        {
-          displayName,
-          email,
-          photoURL: "",
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          lastLoginAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
-    } else {
-      await signInWithEmailAndPassword(services.auth, email, password);
+    if (data?.url) {
+      window.location.href = data.url;
+      return;
     }
 
     setState({
-      authError: "",
-      draftPassword: "",
-      uploadError: "",
-      uploadMessage: isSignup ? "Conta criada. Preparando seu painel..." : "Conta conectada. Carregando seus arquivos...",
-    }, { render: false });
+      authChecking: false,
+      uploadMessage: "Abrindo o login Google...",
+    });
   } catch (error) {
     setState({
       authChecking: false,
-      authError: describeFirebaseError(error),
+      authError: describeSupabaseError(error),
       uploadMessage: "",
     });
   }
 }
 
-async function resetPassword() {
-  if (!services.auth) return;
-
-  const email = normalizeEmail(state.draftEmail);
-  if (!isLikelyEmail(email)) {
-    setState({ authError: "Digite o e-mail da conta antes de pedir a redefinição." });
-    return;
-  }
+async function refreshRemoteUploads() {
+  if (!state.user || !services.supabase) return;
 
   setState({
-    authError: "",
     uploadError: "",
-    uploadMessage: `Enviando link de redefinição para ${email}...`,
+    uploadMessage: "Atualizando a lista de PDFs da conta...",
   });
 
   try {
-    await sendPasswordResetEmail(services.auth, email);
+    await reloadRemoteAccountData(state.user.uid);
     setState({
-      uploadMessage: `Link de redefinição enviado para ${email}.`,
-      authError: "",
-    });
-  } catch (error) {
-    setState({
-      authError: describeFirebaseError(error),
-      uploadMessage: "",
-    });
-  }
-}
-
-async function logout() {
-  if (!services.auth) return;
-
-  try {
-    stopUserSubscriptions();
-    await signOut(services.auth);
-    setState({
-      authError: "",
       uploadError: "",
-      uploadMessage: "",
-      uploadProgress: 0,
-      openingUploadId: "",
-      draftPassword: "",
-      activeTab: "home",
-      agendaTab: "today",
-      syncMessage: "Sessão encerrada. Entre novamente para acessar seus PDFs.",
+      uploadMessage: "Lista de PDFs atualizada com sucesso.",
     });
   } catch (error) {
-    setState({ authError: `Não consegui encerrar a sessão: ${describeFirebaseError(error)}` });
+    setState({
+      uploadError: `Não consegui atualizar a lista de PDFs: ${describeSupabaseError(error)}`,
+      uploadMessage: "",
+    });
   }
-}
-
-function refreshLocalUploads() {
-  if (!state.user) return;
-
-  setState({
-    uploadError: "",
-    uploadMessage: "A lista de PDFs acompanha sua conta em tempo real.",
-  });
 }
 
 async function uploadPdf(file, inputElement) {
-  if (!state.user || !services.db || !services.storage) {
-    setState({ uploadError: "Entre com email e senha antes de enviar o PDF.", uploadMessage: "", uploadProgress: 0 });
+  if (!state.user || !services.supabase) {
+    setState({ uploadError: "Entre com Google antes de enviar o PDF.", uploadMessage: "", uploadProgress: 0 });
     inputElement.value = "";
     return;
   }
@@ -1263,11 +1271,13 @@ async function uploadPdf(file, inputElement) {
     return;
   }
 
-  const uploadId = doc(collection(services.db, "users", state.user.uid, "uploads")).id;
+  const uploadId = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+    ? crypto.randomUUID()
+    : createUploadId();
   const uploadedAtClient = new Date().toISOString();
   const normalizedName = normalizeFileName(file.name);
-  const storagePath = `users/${state.user.uid}/uploads/${uploadId}/${normalizedName}`;
-  const uploadDocRef = doc(services.db, "users", state.user.uid, "uploads", uploadId);
+  const storagePath = `${state.user.uid}/${uploadId}/${normalizedName}`;
+  const bucketName = getSupabaseBucketName();
 
   setState({
     uploadError: "",
@@ -1290,90 +1300,76 @@ async function uploadPdf(file, inputElement) {
     });
 
     try {
-      await setDoc(
-        uploadDocRef,
-        {
-          ownerUid: state.user.uid,
-          originalName: file.name,
-          normalizedName,
-          storagePath,
-          size: file.size,
-          contentType: file.type || "application/pdf",
-          status: "uploading",
-          parserStatus: "parsed_locally",
-          uploadedAtClient,
-          updatedAt: serverTimestamp(),
-          createdAt: serverTimestamp(),
-          notes: "PDF lido com sucesso e aguardando envio para o Storage.",
-          academicData,
-        },
-        { merge: true },
-      );
-
-      await new Promise((resolve, reject) => {
-        const task = uploadBytesResumable(
-          storageRef(services.storage, storagePath),
-          file,
-          { contentType: file.type || "application/pdf" },
-        );
-
-        task.on(
-          "state_changed",
-          (snapshot) => {
-            const progress = snapshot.totalBytes
-              ? Math.max(56, Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100))
-              : 56;
-
-            setState({
-              uploadProgress: progress,
-              uploadMessage: `Enviando ${file.name} para a conta do aluno: ${Math.min(progress, 99)}% concluído.`,
-              uploadError: "",
-            });
-          },
-          reject,
-          resolve,
-        );
+      await upsertUploadRow({
+        id: uploadId,
+        ownerUid: state.user.uid,
+        originalName: file.name,
+        normalizedName,
+        storagePath,
+        size: file.size,
+        contentType: file.type || "application/pdf",
+        status: "uploading",
+        parserStatus: "parsed_locally",
+        uploadedAtClient,
+        notes: "PDF lido com sucesso e aguardando envio para o Storage.",
+        academicData,
       });
 
-      await setDoc(
-        uploadDocRef,
-        {
-          ownerUid: state.user.uid,
-          originalName: file.name,
-          normalizedName,
-          storagePath,
-          size: file.size,
-          contentType: file.type || "application/pdf",
-          status: academicData.schedule.length || academicData.disciplines.length ? "processed" : "limited",
-          parserStatus: "ready",
-          uploadedAtClient,
-          updatedAt: serverTimestamp(),
-          notes: academicData.schedule.length || academicData.disciplines.length
-            ? "PDF enviado e dados acadêmicos sincronizados com a conta."
-            : "PDF enviado, mas com leitura parcial dos dados acadêmicos.",
-          academicData,
-        },
-        { merge: true },
-      );
+      setState({
+        uploadProgress: 72,
+        uploadMessage: `Enviando ${file.name} para a conta do aluno...`,
+        uploadError: "",
+      });
 
-      await setDoc(
-        doc(services.db, "users", state.user.uid),
-        {
-          displayName: state.user.displayName || academicData.profile?.studentName || "",
-          email: state.user.email || "",
-          photoURL: state.user.photoURL || "",
-          activeUploadId: uploadId,
-          activeUploadName: file.name,
-          lastUploadAtClient: uploadedAtClient,
-          updatedAt: serverTimestamp(),
-          lastLoginAt: serverTimestamp(),
-        },
-        { merge: true },
-      );
+      const { error: storageError } = await services.supabase
+        .storage
+        .from(bucketName)
+        .upload(storagePath, file, {
+          contentType: file.type || "application/pdf",
+          upsert: false,
+        });
+
+      if (storageError) {
+        throw storageError;
+      }
+
+      setState({
+        uploadProgress: 90,
+        uploadMessage: "Salvando os metadados do PDF na conta...",
+        uploadError: "",
+      });
+
+      const hasAcademicData = Boolean(academicData.schedule.length || academicData.disciplines.length);
+
+      await upsertUploadRow({
+        id: uploadId,
+        ownerUid: state.user.uid,
+        originalName: file.name,
+        normalizedName,
+        storagePath,
+        size: file.size,
+        contentType: file.type || "application/pdf",
+        status: hasAcademicData ? "processed" : "limited",
+        parserStatus: "ready",
+        uploadedAtClient,
+        notes: hasAcademicData
+          ? "PDF enviado e dados acadêmicos sincronizados com a conta."
+          : "PDF enviado, mas com leitura parcial dos dados acadêmicos.",
+        academicData,
+      });
+
+      await upsertSupabaseProfile(state.user, {
+        display_name: state.user.displayName || academicData.profile?.studentName || "",
+        active_upload_id: uploadId,
+        active_upload_name: file.name,
+        last_upload_at_client: uploadedAtClient,
+      });
+
+      await reloadRemoteAccountData(state.user.uid);
 
       setState({
         uploadProgress: 100,
-        uploadMessage: academicData.schedule.length || academicData.disciplines.length
+        uploadMessage: hasAcademicData
           ? "PDF importado e sincronizado com sucesso na conta do aluno."
           : "PDF enviado para a conta, mas com reconhecimento parcial dos dados acadêmicos.",
         uploadError: "",
@@ -1381,24 +1377,20 @@ async function uploadPdf(file, inputElement) {
       });
     } catch (storageError) {
       try {
-        await setDoc(
-          uploadDocRef,
-          {
-            ownerUid: state.user.uid,
-            originalName: file.name,
-            normalizedName,
-            storagePath,
-            size: file.size,
-            contentType: file.type || "application/pdf",
-            status: "error",
-            parserStatus: "storage_failed",
-            uploadedAtClient,
-            updatedAt: serverTimestamp(),
-            notes: describeFirebaseError(storageError),
-            academicData,
-          },
-          { merge: true },
-        );
+        await upsertUploadRow({
+          id: uploadId,
+          ownerUid: state.user.uid,
+          originalName: file.name,
+          normalizedName,
+          storagePath,
+          size: file.size,
+          contentType: file.type || "application/pdf",
+          status: "error",
+          parserStatus: "storage_failed",
+          uploadedAtClient,
+          notes: describeSupabaseError(storageError),
+          academicData,
+        });
       } catch (secondaryError) {
         // Mantemos o erro original para a interface.
       }
@@ -1409,7 +1401,7 @@ async function uploadPdf(file, inputElement) {
     setState({
       uploadProgress: 0,
       uploadMessage: "",
-      uploadError: `Não consegui importar este PDF do SCA: ${describeFirebaseError(error)}`,
+      uploadError: `Não consegui importar este PDF do SCA: ${describeSupabaseError(error)}`,
     });
   } finally {
     inputElement.value = "";
@@ -1493,21 +1485,18 @@ async function loadPortalTab(tab, silent = false) {
 }
 
 async function setActiveUpload(uploadId) {
-  if (!state.user || !uploadId || !services.db) return;
+  if (!state.user || !uploadId || !services.supabase) return;
 
   const upload = state.uploads.find((item) => item.id === uploadId);
   if (!upload) return;
 
   try {
-    await setDoc(
-      doc(services.db, "users", state.user.uid),
-      {
-        activeUploadId: upload.id,
-        activeUploadName: upload.originalName,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true },
-    );
+    await upsertSupabaseProfile(state.user, {
+      active_upload_id: upload.id,
+      active_upload_name: upload.originalName,
+    });
+
+    await reloadRemoteAccountData(state.user.uid);
 
     setState({
       uploadMessage: `${upload.originalName} agora é o PDF ativo desta conta.`,
@@ -1515,7 +1504,7 @@ async function setActiveUpload(uploadId) {
     });
   } catch (error) {
     setState({
-      uploadError: `Não consegui definir o PDF ativo: ${describeFirebaseError(error)}`,
+      uploadError: `Não consegui definir o PDF ativo: ${describeSupabaseError(error)}`,
       uploadMessage: "",
     });
   }
@@ -1529,16 +1518,23 @@ async function openUpload(uploadId) {
 
   try {
     const record = state.uploads.find((item) => item.id === uploadId);
-    if (!record || !record.storagePath || !services.storage) {
+    if (!record || !record.storagePath || !services.supabase) {
       throw new Error("arquivo não encontrado no armazenamento da conta");
     }
 
-    const url = await getDownloadURL(storageRef(services.storage, record.storagePath));
+    const { data, error } = await services.supabase
+      .storage
+      .from(getSupabaseBucketName())
+      .createSignedUrl(record.storagePath, 60);
+
+    if (error || !data?.signedUrl) {
+      throw error || new Error("não consegui criar um link temporário para este PDF");
+    }
 
     if (popup) {
-      popup.location.href = url;
+      popup.location.href = data.signedUrl;
     } else {
-      window.open(url, "_blank", "noopener");
+      window.open(data.signedUrl, "_blank", "noopener");
     }
 
     setState({ openingUploadId: "", uploadMessage: `${record.originalName} aberto em nova aba.`, uploadError: "" });
@@ -1546,7 +1542,7 @@ async function openUpload(uploadId) {
     if (popup) popup.close();
     setState({
       openingUploadId: "",
-      uploadError: `Não consegui abrir o PDF: ${describeFirebaseError(error)}`,
+      uploadError: `Não consegui abrir o PDF: ${describeSupabaseError(error)}`,
       uploadMessage: "",
     });
   }
@@ -1648,39 +1644,54 @@ function getStatusMessage() {
   return state.uploadError || state.authError || state.uploadMessage || state.syncMessage;
 }
 
-function hasFirebaseConfig(config) {
-  return [
-    config.apiKey,
-    config.authDomain,
-    config.projectId,
-    config.storageBucket,
-    config.messagingSenderId,
-    config.appId,
-  ].every((value) => value && !String(value).includes("PREENCHA") && !String(value).includes("SEU-PROJETO"));
+function hasSupabaseConfig(config) {
+  return [config.url, config.anonKey]
+    .every((value) => value && !String(value).includes("COLE_AQUI") && !String(value).includes("PREENCHA"));
 }
 
-function describeFirebaseError(error) {
-  const code = String(error?.code || "");
-  const fallback = error?.message || describeLocalError(error);
+function describeSupabaseError(error) {
+  const code = String(error?.code || error?.error_code || "");
+  const message = String(error?.message || error?.error_description || "");
+  const fallback = message || describeLocalError(error);
+  const normalized = `${code} ${message}`.toLowerCase();
 
-  const knownErrors = {
-    "auth/invalid-email": "o e-mail informado não é válido",
-    "auth/email-already-in-use": "já existe uma conta com este e-mail",
-    "auth/invalid-credential": "e-mail ou senha inválidos",
-    "auth/user-not-found": "não encontrei uma conta com este e-mail",
-    "auth/wrong-password": "senha incorreta",
-    "auth/weak-password": "a senha é fraca demais; use pelo menos 6 caracteres",
-    "auth/too-many-requests": "muitas tentativas seguidas; aguarde um pouco e tente novamente",
-    "auth/network-request-failed": "não consegui falar com o Firebase agora; confira a conexão",
-    "auth/missing-password": "digite a senha da conta",
-    "auth/operation-not-allowed": "habilite Email/Password em Authentication > Sign-in method no Firebase",
-    "auth/unauthorized-domain": "adicione este domínio em Authentication > Settings > Authorized domains no Firebase",
-    "storage/unauthorized": "as regras do Firebase Storage não permitem este upload para o utilizador atual",
-    "storage/object-not-found": "não encontrei o PDF no armazenamento da conta",
-    "permission-denied": "as regras do Firestore não permitem esta operação para o utilizador atual",
-  };
+  if (normalized.includes("network") || normalized.includes("fetch")) {
+    return "não consegui falar com o Supabase agora; confira a conexão e tente novamente";
+  }
 
-  return knownErrors[code] || fallback;
+  if (normalized.includes("invalid login credentials")) {
+    return "não consegui autenticar com essa conta Google";
+  }
+
+  if (normalized.includes("provider is not enabled")) {
+    return "habilite o Google em Authentication > Providers dentro do Supabase";
+  }
+
+  if (normalized.includes("redirect") && normalized.includes("allow")) {
+    return "adicione esta URL em Authentication > URL Configuration no Supabase";
+  }
+
+  if (normalized.includes("row-level security") || normalized.includes("permission denied")) {
+    return "as policies do Supabase ainda não permitem esta operação para o aluno atual";
+  }
+
+  if (normalized.includes("duplicate key")) {
+    return "este PDF já foi salvo anteriormente na conta";
+  }
+
+  if (normalized.includes("mime type") || normalized.includes("invalid file")) {
+    return "o bucket só aceita PDF; confira o arquivo enviado";
+  }
+
+  if (normalized.includes("bucket not found")) {
+    return "não encontrei o bucket configurado no Supabase Storage";
+  }
+
+  if (normalized.includes("object not found")) {
+    return "não encontrei o PDF no armazenamento da conta";
+  }
+
+  return fallback;
 }
 
 function timestampToIso(value) {
@@ -1833,9 +1844,6 @@ function persistUiState() {
       menu: state.menu,
       lastMenuSync: state.lastMenuSync,
       syncMessage: state.syncMessage,
-      authMode: state.authMode,
-      draftName: state.draftName,
-      draftEmail: state.draftEmail,
     }),
   );
 }
@@ -2030,7 +2038,11 @@ function createLocalUid(email) {
 }
 
 function createUploadId() {
-  return `upload-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (character) => {
+    const random = Math.floor(Math.random() * 16);
+    const value = character === "x" ? random : ((random & 0x3) | 0x8);
+    return value.toString(16);
+  });
 }
 
 function normalizePersonName(value) {
@@ -2156,4 +2168,14 @@ function escape(value) {
 
 function escapeAttribute(value) {
   return escape(value);
+}
+
+function uniqueBy(items, selector) {
+  const map = new Map();
+
+  for (const item of items || []) {
+    map.set(selector(item), item);
+  }
+
+  return Array.from(map.values());
 }
