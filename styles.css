@@ -1013,6 +1013,7 @@ body::before {
 }
 
 .inline-field input[type="text"],
+.inline-field input[type="url"],
 .inline-field input[type="email"],
 .inline-field input[type="date"] {
   min-height: 3rem;

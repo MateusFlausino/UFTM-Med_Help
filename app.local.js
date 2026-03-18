@@ -17,7 +17,7 @@ const DOCUMENT_TYPES = {
   schedule: "schedule",
   studentCard: "student_card",
 };
-const PENDING_REGISTRATION_MESSAGE = "Aguardando finalização do cadastro. Envie a grade horária e a carteirinha estudantil para liberar o app.";
+const PENDING_REGISTRATION_MESSAGE = "Aguardando finalização do cadastro. Envie a grade horária e o link da carteirinha estudantil para liberar o app.";
 
 const UI_STORAGE_KEY = "uftm-mobile-local-ui-v1";
 const SESSION_STORAGE_KEY = "uftm-mobile-local-session-v1";
@@ -150,6 +150,7 @@ let state = {
   uploadError: "",
   uploadProgress: 0,
   openingUploadId: "",
+  studentCardUrlDraft: "",
   documentViewer: createEmptyDocumentViewerState(),
   portalContent: {},
   newsFeed: [],
@@ -236,6 +237,7 @@ async function handleSupabaseSession(session) {
       user: null,
       profile: null,
       uploads: [],
+      studentCardUrlDraft: "",
       uploadMessage: "",
       uploadError: "",
       uploadProgress: 0,
@@ -263,6 +265,7 @@ async function handleSupabaseSession(session) {
       activeUploadName: "",
     },
     uploads: [],
+    studentCardUrlDraft: "",
     uploadError: "",
     uploadMessage: "Conta Google conectada com sucesso.",
   });
@@ -282,6 +285,7 @@ async function handleSupabaseSession(session) {
       },
       profile,
       uploads,
+      studentCardUrlDraft: getStudentCardLinkUrl(getPrimaryStudentCardUploadFromUploads(uploads)),
       activeTab: hasCompletedRegistration(uploads, profile) ? state.activeTab : REGISTRATION_TAB_ID,
       agendaTab: hasCompletedRegistration(uploads, profile) ? state.agendaTab : "today",
       uploadError: "",
@@ -289,7 +293,7 @@ async function handleSupabaseSession(session) {
         ? hasCompletedRegistration(uploads, profile)
           ? "Conta conectada. Seus documentos privados foram sincronizados."
           : PENDING_REGISTRATION_MESSAGE
-        : "Conta conectada. Envie a grade horaria e a carteirinha estudantil para liberar o painel.",
+        : "Conta conectada. Envie a grade horaria e o link da carteirinha estudantil para liberar o painel.",
     });
   } catch (error) {
     setState({
@@ -363,6 +367,7 @@ async function reloadRemoteAccountData(userUid) {
   const activeUpload = scheduleUploads.find((item) => item.id === profile.activeUploadId) || scheduleUploads[0] || null;
   const academicData = getAcademicData(activeUpload);
   const registrationComplete = hasCompletedRegistration(uploads, profile);
+  const studentCardUpload = getPrimaryStudentCardUploadFromUploads(uploads);
 
   setState({
     user: state.user
@@ -375,6 +380,7 @@ async function reloadRemoteAccountData(userUid) {
       : state.user,
     profile,
     uploads,
+    studentCardUrlDraft: getStudentCardLinkUrl(studentCardUpload),
     activeTab: registrationComplete ? state.activeTab : REGISTRATION_TAB_ID,
     agendaTab: registrationComplete ? state.agendaTab : "today",
     referenceDate: academicData?.schedule?.length
@@ -475,11 +481,69 @@ function inferDocumentTypeFromStoragePath(storagePath, parserStatus = "") {
   return DOCUMENT_TYPES.schedule;
 }
 
+function getPrimaryStudentCardUploadFromUploads(uploads = []) {
+  const studentCardUploads = (uploads || []).filter((item) => item.documentType === DOCUMENT_TYPES.studentCard);
+  return studentCardUploads.find((item) => isStudentCardLinkUpload(item)) || studentCardUploads[0] || null;
+}
+
+function isStudentCardLinkUpload(upload) {
+  return upload?.documentType === DOCUMENT_TYPES.studentCard && String(upload?.parserStatus || "") === "student_card_link";
+}
+
+function getStudentCardLinkUrl(upload) {
+  if (!isStudentCardLinkUpload(upload)) {
+    return "";
+  }
+
+  const normalized = normalizeStudentCardLink(upload.notes || "");
+  return isAllowedStudentCardUrl(normalized) ? normalized : "";
+}
+
+function normalizeStudentCardLink(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  const candidate = /^[a-z]+:\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed.replace(/^\/+/, "")}`;
+
+  try {
+    return new URL(candidate).toString();
+  } catch (error) {
+    return "";
+  }
+}
+
+function isAllowedStudentCardUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    const hostname = String(url.hostname || "").toLowerCase();
+    return url.protocol === "https:" && (hostname === "uftm.edu.br" || hostname.endsWith(".uftm.edu.br"));
+  } catch (error) {
+    return false;
+  }
+}
+
+function getStudentCardUrlLabel(upload) {
+  const url = getStudentCardLinkUrl(upload);
+  if (!url) {
+    return "";
+  }
+
+  try {
+    return new URL(url).hostname.replace(/^www\./i, "");
+  } catch (error) {
+    return "";
+  }
+}
+
 function hasCompletedRegistration(uploads, profile) {
   const scheduleUploads = (uploads || []).filter((item) => item.documentType !== DOCUMENT_TYPES.studentCard);
-  const studentCardUploads = (uploads || []).filter((item) => item.documentType === DOCUMENT_TYPES.studentCard);
+  const studentCardUpload = getPrimaryStudentCardUploadFromUploads(uploads);
   const activeSchedule = scheduleUploads.find((item) => item.id === profile?.activeUploadId) || scheduleUploads[0] || null;
-  return Boolean(activeSchedule && studentCardUploads[0]);
+  return Boolean(activeSchedule && getStudentCardLinkUrl(studentCardUpload));
 }
 
 function createEmptyDocumentViewerState() {
@@ -487,6 +551,7 @@ function createEmptyDocumentViewerState() {
     uploadId: "",
     title: "",
     objectUrl: "",
+    externalUrl: "",
     documentType: "",
     sourceTab: "home",
     sourceAgendaTab: "today",
@@ -631,6 +696,7 @@ function renderDocumentViewer() {
     ? "Carteirinha estudantil"
     : viewer.title || "Documento";
   const topline = viewer.documentType === DOCUMENT_TYPES.studentCard ? "ID digital" : "Documento";
+  const frameSrc = viewer.externalUrl || (viewer.objectUrl ? `${viewer.objectUrl}#toolbar=0&navpanes=0&scrollbar=1` : "");
 
   return `
     <section class="section-stack simple-stack">
@@ -645,10 +711,10 @@ function renderDocumentViewer() {
           </div>
         </div>
         ${viewer.loading
-          ? `<div class="empty-state" style="margin-top: 1rem;">Carregando o PDF dentro do app...</div>`
-          : viewer.objectUrl
-            ? `<iframe class="document-viewer-frame" src="${escapeAttribute(`${viewer.objectUrl}#toolbar=0&navpanes=0&scrollbar=1`)}" title="${escapeAttribute(title)}"></iframe>`
-            : `<div class="empty-state" style="margin-top: 1rem;">Nao consegui preparar este PDF agora.</div>`}
+          ? `<div class="empty-state" style="margin-top: 1rem;">${viewer.documentType === DOCUMENT_TYPES.studentCard ? "Carregando o ID digital dentro do app..." : "Carregando o documento dentro do app..."}</div>`
+          : frameSrc
+            ? `<iframe class="document-viewer-frame" src="${escapeAttribute(frameSrc)}" title="${escapeAttribute(title)}" referrerpolicy="no-referrer"></iframe>`
+            : `<div class="empty-state" style="margin-top: 1rem;">Nao consegui preparar este documento agora.</div>`}
       </section>
     </section>
   `;
@@ -703,6 +769,7 @@ function renderSidebarItem(item, registration) {
 function renderRegistrationPanel(registration) {
   const scheduleUploads = getScheduleUploads();
   const studentCardUpload = registration.studentCardUpload;
+  const studentCardLink = getStudentCardLinkUrl(studentCardUpload);
 
   return `
     <section class="section-stack simple-stack">
@@ -711,12 +778,12 @@ function renderRegistrationPanel(registration) {
         <h2 class="section-title">${registration.isComplete ? "Cadastro concluido" : "Envie os dois documentos antes do primeiro uso"}</h2>
         <p class="section-copy">
           ${registration.isComplete
-            ? "Sua grade horaria e sua carteirinha estudantil ja estao vinculadas a conta. Sempre que precisar, voce pode atualizar os arquivos aqui."
-            : "Para liberar o painel do DAGV, precisamos da grade horaria em PDF e da carteirinha estudantil em PDF. Ate la, o app fica em modo de espera com avisos simples."}
+            ? "Sua grade horaria e seu ID digital ja estao vinculados a conta. Sempre que precisar, voce pode atualizar os dados aqui."
+            : "Para liberar o painel do DAGV, precisamos da grade horaria em PDF e do link oficial da carteirinha estudantil. Ate la, o app fica em modo de espera com avisos simples."}
         </p>
         <div class="simple-meta-grid">
           ${renderRegistrationStatusCard("Grade horaria", registration.scheduleUpload ? "Recebida" : "Aguardando PDF", registration.scheduleUpload ? getExtractionCaption(registration.scheduleUpload) : "Envie o PDF do SCA para montar sua agenda.")}
-          ${renderRegistrationStatusCard("Carteirinha estudantil", studentCardUpload ? "Recebida" : "Aguardando PDF", studentCardUpload ? "O item ID Digital do menu ja abre o PDF salvo." : "Pre-configurada para o PDF oficial que a UFTM disponibilizar.")}
+          ${renderRegistrationStatusCard("ID digital", studentCardUpload ? "Link salvo" : "Aguardando link", studentCardUpload ? "O item ID Digital do menu ja abre a carteirinha dentro do app." : "Cole o link oficial da carteirinha virtual da UFTM.")}
         </div>
       </section>
 
@@ -751,18 +818,21 @@ function renderRegistrationPanel(registration) {
           </div>
           ${studentCardUpload ? `<button class="ghost" data-action="open-student-card">Abrir ID digital</button>` : ""}
         </div>
-        <p class="section-copy">Deixe o PDF da carteirinha salvo na conta. O modelo oficial da UFTM pode ser trocado depois sem mudar o fluxo.</p>
+        <p class="section-copy">Cole o link oficial da carteirinha virtual da UFTM para abrir o ID digital dentro do app.</p>
         <div class="upload-drop registration-drop" style="margin-top: 1rem;">
-          <input id="studentCardInput" class="file-input" type="file" accept="application/pdf,.pdf" />
+          <div class="inline-field">
+            <label for="studentCardUrlInput">Link da carteirinha virtual</label>
+            <input id="studentCardUrlInput" type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="https://siscad.uftm.edu.br/carteiravirtual/..." value="${escapeAttribute(state.studentCardUrlDraft || studentCardLink)}" />
+          </div>
           <div class="button-row">
-            <label class="file-trigger" for="studentCardInput">${studentCardUpload ? "Atualizar carteirinha" : "Enviar carteirinha estudantil"}</label>
+            <button class="ghost" data-action="save-student-card-link">${studentCardUpload ? "Atualizar link" : "Salvar link"}</button>
           </div>
           ${studentCardUpload ? `
             <div class="simple-meta-grid">
-              <div class="mini-card"><small>ID digital</small><strong>${escape(studentCardUpload.originalName)}</strong><span>${escape(formatBytes(studentCardUpload.size))}</span></div>
+              <div class="mini-card"><small>ID digital</small><strong>${escape(studentCardUpload.originalName || "Carteirinha virtual UFTM")}</strong><span>${escape(getStudentCardUrlLabel(studentCardUpload) || "Leitura interna pelo app")}</span></div>
               <div class="mini-card"><small>Status</small><strong>Pronto</strong><span>Abre direto pelo menu lateral.</span></div>
             </div>
-          ` : `<div class="support-line" style="margin-top: 0.85rem;">Aguardando o PDF da carteirinha para habilitar o item ID Digital.</div>`}
+          ` : `<div class="support-line" style="margin-top: 0.85rem;">Cole o link da carteirinha para habilitar o item ID Digital.</div>`}
         </div>
       </section>
 
@@ -777,7 +847,7 @@ function renderRegistrationPanel(registration) {
             ${scheduleUploads.length || studentCardUpload
             ? [
                 ...scheduleUploads.map((item) => renderUploadItem(item, registration.scheduleUpload)),
-                ...getStudentCardUploads().map((item) => renderUploadItem(item, studentCardUpload)),
+                ...(studentCardUpload ? [renderUploadItem(studentCardUpload, studentCardUpload)] : []),
               ].join("")
             : `<div class="empty-state">Nenhum documento foi enviado ainda.</div>`}
         </div>
@@ -1062,12 +1132,15 @@ function renderUploadStatus() {
 function renderUploadItem(item, activeUpload) {
   const isActive = activeUpload && activeUpload.id === item.id;
   const isStudentCard = item.documentType === DOCUMENT_TYPES.studentCard;
+  const supportLabel = isStudentCard
+    ? `${isStudentCardLinkUpload(item) ? "Link da carteirinha" : "Carteirinha estudantil"} • ${formatShortDateTime(item.uploadedAtClient)}${getStudentCardUrlLabel(item) ? ` • ${getStudentCardUrlLabel(item)}` : ""}`
+    : `Grade horaria • ${formatShortDateTime(item.uploadedAtClient)} • ${formatBytes(item.size)}`;
   return `
     <article class="upload-entry ${isActive ? "is-active" : ""}">
       <div class="upload-entry-top">
         <div>
           <h3 class="schedule-title">${escape(item.originalName)}</h3>
-          <div class="support-line">${escape(isStudentCard ? "Carteirinha estudantil" : "Grade horaria")} • ${escape(formatShortDateTime(item.uploadedAtClient))} • ${escape(formatBytes(item.size))}</div>
+          <div class="support-line">${escape(supportLabel)}</div>
         </div>
         <span class="tag">${escape(getUploadStatusLabel(item))}</span>
       </div>
@@ -1365,11 +1438,16 @@ function getStudentCardUploads() {
   return state.uploads.filter((item) => item.documentType === DOCUMENT_TYPES.studentCard);
 }
 
+function getPrimaryStudentCardUpload() {
+  return getPrimaryStudentCardUploadFromUploads(state.uploads);
+}
+
 function getRegistrationState() {
   const scheduleUploads = getScheduleUploads();
-  const studentCardUploads = getStudentCardUploads();
   const scheduleUpload = getActiveUpload();
-  const studentCardUpload = studentCardUploads[0] || null;
+  const studentCardUploads = getStudentCardUploads();
+  const studentCardCandidate = getPrimaryStudentCardUpload();
+  const studentCardUpload = getStudentCardLinkUrl(studentCardCandidate) ? studentCardCandidate : null;
   const missing = [];
 
   if (!scheduleUpload) {
@@ -1377,7 +1455,7 @@ function getRegistrationState() {
   }
 
   if (!studentCardUpload) {
-    missing.push("carteirinha estudantil");
+    missing.push("link da carteirinha estudantil");
   }
 
   return {
@@ -1526,13 +1604,18 @@ async function onClick(event) {
         sidebarOpen: false,
         documentViewer: createEmptyDocumentViewerState(),
         uploadError: "",
-        uploadMessage: "A carteirinha digital ainda aguarda o PDF oficial do aluno.",
+        uploadMessage: "O ID digital ainda aguarda o link oficial da carteirinha do aluno.",
       });
       return;
     }
 
     setState({ sidebarOpen: false });
     openUpload(studentCardUpload.id, { inline: true });
+    return;
+  }
+
+  if (action === "save-student-card-link") {
+    saveStudentCardLink();
     return;
   }
 
@@ -1554,6 +1637,14 @@ async function onClick(event) {
 function onInput(event) {
   if (event.target.id && String(event.target.id).startsWith("login")) {
     setState({ authError: "" }, { render: false });
+    return;
+  }
+
+  if (event.target.id === "studentCardUrlInput") {
+    setState({
+      studentCardUrlDraft: event.target.value || "",
+      uploadError: "",
+    }, { render: false });
   }
 }
 
@@ -1565,11 +1656,6 @@ function onChange(event) {
 
   if (event.target.id === "schedulePdfInput" && event.target.files && event.target.files[0]) {
     uploadDocument(event.target.files[0], event.target, DOCUMENT_TYPES.schedule);
-    return;
-  }
-
-  if (event.target.id === "studentCardInput" && event.target.files && event.target.files[0]) {
-    uploadDocument(event.target.files[0], event.target, DOCUMENT_TYPES.studentCard);
   }
 }
 
@@ -1590,6 +1676,7 @@ async function logout() {
       uploadMessage: "",
       uploadProgress: 0,
       openingUploadId: "",
+      studentCardUrlDraft: "",
       activeTab: "home",
       agendaTab: "today",
       sidebarOpen: false,
@@ -1680,11 +1767,6 @@ async function refreshRemoteUploads() {
 }
 
 async function uploadDocument(file, inputElement, documentType) {
-  if (documentType === DOCUMENT_TYPES.studentCard) {
-    await uploadStudentCardDocument(file, inputElement);
-    return;
-  }
-
   await uploadScheduleDocument(file, inputElement);
 }
 
@@ -1837,74 +1919,50 @@ async function uploadScheduleDocument(file, inputElement) {
   }
 }
 
-async function uploadStudentCardDocument(file, inputElement) {
+async function saveStudentCardLink() {
   if (!state.user || !services.supabase) {
-    setState({ uploadError: "Entre com Google antes de enviar a carteirinha.", uploadMessage: "", uploadProgress: 0 });
-    inputElement.value = "";
+    setState({ uploadError: "Entre com Google antes de salvar o link da carteirinha.", uploadMessage: "", uploadProgress: 0 });
     return;
   }
 
-  if (!isPdfFile(file)) {
-    setState({ uploadError: "Selecione um arquivo PDF valido para a carteirinha estudantil.", uploadMessage: "", uploadProgress: 0 });
-    inputElement.value = "";
+  const studentCardUrl = normalizeStudentCardLink(state.studentCardUrlDraft);
+  if (!studentCardUrl || !isAllowedStudentCardUrl(studentCardUrl)) {
+    setState({
+      uploadError: "Cole um link HTTPS oficial da UFTM para a carteirinha estudantil.",
+      uploadMessage: "",
+      uploadProgress: 0,
+    });
     return;
   }
 
-  const uploadId = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+  const currentUpload = getPrimaryStudentCardUpload();
+  const uploadId = currentUpload?.id || ((typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
     ? crypto.randomUUID()
-    : createUploadId();
+    : createUploadId());
   const uploadedAtClient = new Date().toISOString();
-  const normalizedName = normalizeFileName(file.name);
-  const storagePath = `${state.user.uid}/student-card/${uploadId}/${normalizedName}`;
-  const bucketName = getSupabaseBucketName();
+  const storagePath = `${state.user.uid}/student-card/link`;
 
   setState({
     uploadError: "",
-    uploadMessage: `Enviando ${file.name} como carteirinha estudantil...`,
-    uploadProgress: 24,
+    uploadMessage: currentUpload ? "Atualizando o link do ID digital..." : "Salvando o link do ID digital...",
+    uploadProgress: 40,
     activeTab: REGISTRATION_TAB_ID,
+    studentCardUrlDraft: studentCardUrl,
   });
 
   try {
     await upsertUploadRow({
       id: uploadId,
       ownerUid: state.user.uid,
-      originalName: file.name,
-      normalizedName,
+      originalName: "Carteirinha virtual UFTM",
+      normalizedName: "id-digital-link",
       storagePath,
-      size: file.size,
-      contentType: file.type || "application/pdf",
-      status: "uploading",
-      parserStatus: "student_card_pending",
+      size: 0,
+      contentType: "text/uri-list",
+      status: "linked",
+      parserStatus: "student_card_link",
       uploadedAtClient,
-      notes: "Carteirinha estudantil aguardando envio completo para o Storage.",
-      academicData: null,
-    });
-
-    const { error: storageError } = await services.supabase
-      .storage
-      .from(bucketName)
-      .upload(storagePath, file, {
-        contentType: file.type || "application/pdf",
-        upsert: false,
-      });
-
-    if (storageError) {
-      throw storageError;
-    }
-
-    await upsertUploadRow({
-      id: uploadId,
-      ownerUid: state.user.uid,
-      originalName: file.name,
-      normalizedName,
-      storagePath,
-      size: file.size,
-      contentType: file.type || "application/pdf",
-      status: "uploaded",
-      parserStatus: "student_card_ready",
-      uploadedAtClient,
-      notes: "Carteirinha estudantil salva e pronta para abrir pelo menu lateral.",
+      notes: studentCardUrl,
       academicData: null,
     });
 
@@ -1912,17 +1970,16 @@ async function uploadStudentCardDocument(file, inputElement) {
 
     setState({
       uploadProgress: 100,
-      uploadMessage: "Carteirinha estudantil vinculada com sucesso. O item ID Digital ja pode abrir o PDF.",
+      uploadMessage: "ID digital vinculado com sucesso. O item ID Digital ja abre dentro do app.",
       uploadError: "",
+      studentCardUrlDraft: studentCardUrl,
     });
   } catch (error) {
     setState({
       uploadProgress: 0,
       uploadMessage: "",
-      uploadError: `Nao consegui vincular a carteirinha estudantil: ${describeSupabaseError(error)}`,
+      uploadError: `Nao consegui salvar o link da carteirinha: ${describeSupabaseError(error)}`,
     });
-  } finally {
-    inputElement.value = "";
   }
 }
 
@@ -2034,7 +2091,7 @@ async function openUpload(uploadId, options = {}) {
   const record = state.uploads.find((item) => item.id === uploadId);
   if (!record || !record.storagePath || !services.supabase) {
     setState({
-      uploadError: "Não consegui localizar este PDF agora.",
+      uploadError: "Não consegui localizar este documento agora.",
       uploadMessage: "",
       openingUploadId: "",
     });
@@ -2052,13 +2109,14 @@ async function openUpload(uploadId, options = {}) {
   setState({
     openingUploadId: uploadId,
     uploadError: "",
-    uploadMessage: inline ? "Carregando o PDF dentro do app..." : "Abrindo o PDF da conta...",
+    uploadMessage: inline ? "Carregando o documento dentro do app..." : "Abrindo o documento da conta...",
     activeTab: inline ? DOCUMENT_VIEWER_TAB_ID : state.activeTab,
     documentViewer: inline
       ? {
           uploadId,
           title: record.originalName,
           objectUrl: "",
+          externalUrl: "",
           documentType: record.documentType,
           sourceTab,
           sourceAgendaTab,
@@ -2068,6 +2126,37 @@ async function openUpload(uploadId, options = {}) {
   });
 
   try {
+    if (isStudentCardLinkUpload(record)) {
+      const externalUrl = getStudentCardLinkUrl(record);
+      if (!externalUrl) {
+        throw new Error("nao encontrei o link oficial da carteirinha");
+      }
+
+      if (!inline) {
+        window.open(externalUrl, "_blank", "noopener,noreferrer");
+        setState({ openingUploadId: "", uploadMessage: "ID digital aberto em nova aba.", uploadError: "" });
+        return;
+      }
+
+      setState({
+        openingUploadId: "",
+        uploadMessage: "ID digital carregado dentro do app.",
+        uploadError: "",
+        activeTab: DOCUMENT_VIEWER_TAB_ID,
+        documentViewer: {
+          uploadId,
+          title: record.originalName,
+          objectUrl: "",
+          externalUrl,
+          documentType: record.documentType,
+          sourceTab,
+          sourceAgendaTab,
+          loading: false,
+        },
+      });
+      return;
+    }
+
     const { data, error } = await services.supabase
       .storage
       .from(getSupabaseBucketName())
@@ -2107,6 +2196,7 @@ async function openUpload(uploadId, options = {}) {
         uploadId,
         title: record.originalName,
         objectUrl,
+        externalUrl: "",
         documentType: record.documentType,
         sourceTab,
         sourceAgendaTab,
@@ -2120,7 +2210,7 @@ async function openUpload(uploadId, options = {}) {
       activeTab: sourceTab,
       agendaTab: sourceAgendaTab,
       documentViewer: createEmptyDocumentViewerState(),
-      uploadError: `Não consegui abrir o PDF: ${describeSupabaseError(error)}`,
+      uploadError: `Não consegui abrir o documento: ${describeSupabaseError(error)}`,
       uploadMessage: "",
     });
   }
@@ -2231,6 +2321,7 @@ function getExtractionCaption(upload) {
 function getUploadStatusLabel(upload) {
   if (!upload) return "Sem arquivo";
   if (upload.documentType === DOCUMENT_TYPES.studentCard) {
+    if (isStudentCardLinkUpload(upload)) return "Link salvo";
     if (upload.status === "uploading") return "Enviando";
     if (upload.status === "error") return "Falhou";
     return "Pronto";

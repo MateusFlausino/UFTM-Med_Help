@@ -15,7 +15,7 @@ const cspDirectives = [
   "style-src 'self' 'unsafe-inline'",
   "worker-src 'self' blob:",
   "img-src 'self' data: blob: https://dagvmeduftm.wordpress.com https://*.wordpress.com https://*.wp.com https://*.supabase.co",
-  "frame-src 'self' blob:",
+  "frame-src 'self' blob: https://uftm.edu.br https://*.uftm.edu.br",
   "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
   "font-src 'self' data:",
 ];
