@@ -51,6 +51,11 @@ const server = http.createServer((request, response) => {
     return;
   }
 
+  if ((request.url || "").startsWith("/api/student-card-image")) {
+    handleApiRoute("./api/student-card-image", request, response);
+    return;
+  }
+
   const requestUrl = request.url === "/" ? "/index.html" : request.url || "/index.html";
   const safePath = path.normalize(decodeURIComponent(requestUrl)).replace(/^(\.\.[/\\])+/, "");
   const relativePath = safePath.startsWith("/") ? `.${safePath}` : safePath;

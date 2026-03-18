@@ -540,6 +540,235 @@ function getStudentCardUrlLabel(upload) {
   }
 }
 
+function buildStudentCardProxyUrl(value) {
+  const normalized = normalizeStudentCardLink(value);
+  if (!normalized) {
+    return "";
+  }
+
+  return `/api/student-card-image?url=${encodeURIComponent(normalized)}`;
+}
+
+async function prepareStudentCardInlineSource(externalUrl) {
+  const proxyUrl = buildStudentCardProxyUrl(externalUrl);
+  if (!proxyUrl) {
+    return {
+      objectUrl: "",
+      externalUrl,
+    };
+  }
+
+  try {
+    const response = await fetch(proxyUrl, {
+      method: "GET",
+      cache: "no-store",
+      credentials: "omit",
+    });
+
+    if (!response.ok) {
+      throw new Error(`falha ao buscar a imagem da carteirinha (${response.status})`);
+    }
+
+    const blob = await response.blob();
+    const objectUrl = await createCroppedStudentCardObjectUrl(blob);
+
+    return {
+      objectUrl,
+      externalUrl: "",
+    };
+  } catch (error) {
+    return {
+      objectUrl: "",
+      externalUrl,
+    };
+  }
+}
+
+async function createCroppedStudentCardObjectUrl(blob) {
+  const sourceUrl = URL.createObjectURL(blob);
+
+  try {
+    const image = await loadImageElement(sourceUrl);
+    const bounds = detectStudentCardBounds(image);
+
+    if (!bounds) {
+      return sourceUrl;
+    }
+
+    const cropChanged = bounds.x > 0
+      || bounds.y > 0
+      || bounds.width < image.naturalWidth
+      || bounds.height < image.naturalHeight;
+
+    if (!cropChanged) {
+      return sourceUrl;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = bounds.width;
+    canvas.height = bounds.height;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return sourceUrl;
+    }
+
+    context.drawImage(
+      image,
+      bounds.x,
+      bounds.y,
+      bounds.width,
+      bounds.height,
+      0,
+      0,
+      bounds.width,
+      bounds.height,
+    );
+
+    const croppedBlob = await canvasToBlob(canvas, resolveCanvasImageType(blob.type));
+    if (!croppedBlob) {
+      return sourceUrl;
+    }
+
+    const croppedUrl = URL.createObjectURL(croppedBlob);
+    URL.revokeObjectURL(sourceUrl);
+    return croppedUrl;
+  } catch (error) {
+    URL.revokeObjectURL(sourceUrl);
+    throw error;
+  }
+}
+
+function resolveCanvasImageType(contentType) {
+  return /^image\/(png|jpeg|jpg|webp)$/i.test(String(contentType || "")) ? contentType : "image/png";
+}
+
+function loadImageElement(src) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.decoding = "async";
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("nao consegui carregar a imagem da carteirinha"));
+    image.src = src;
+  });
+}
+
+function canvasToBlob(canvas, type) {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), type, 0.92);
+  });
+}
+
+function detectStudentCardBounds(image) {
+  const naturalWidth = Number(image.naturalWidth || 0);
+  const naturalHeight = Number(image.naturalHeight || 0);
+
+  if (!naturalWidth || !naturalHeight) {
+    return null;
+  }
+
+  const maxSampleSide = 960;
+  const scale = Math.min(1, maxSampleSide / Math.max(naturalWidth, naturalHeight));
+  const sampleWidth = Math.max(1, Math.round(naturalWidth * scale));
+  const sampleHeight = Math.max(1, Math.round(naturalHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = sampleWidth;
+  canvas.height = sampleHeight;
+
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    return null;
+  }
+
+  context.drawImage(image, 0, 0, sampleWidth, sampleHeight);
+  const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight);
+  const rowThreshold = Math.max(12, Math.round(sampleWidth * 0.025));
+  const columnThreshold = Math.max(12, Math.round(sampleHeight * 0.025));
+
+  let top = 0;
+  while (top < sampleHeight && countVisiblePixelsInRow(data, sampleWidth, top) < rowThreshold) {
+    top += 1;
+  }
+
+  let bottom = sampleHeight - 1;
+  while (bottom >= top && countVisiblePixelsInRow(data, sampleWidth, bottom) < rowThreshold) {
+    bottom -= 1;
+  }
+
+  let left = 0;
+  while (left < sampleWidth && countVisiblePixelsInColumn(data, sampleWidth, sampleHeight, left) < columnThreshold) {
+    left += 1;
+  }
+
+  let right = sampleWidth - 1;
+  while (right >= left && countVisiblePixelsInColumn(data, sampleWidth, sampleHeight, right) < columnThreshold) {
+    right -= 1;
+  }
+
+  if (left >= right || top >= bottom) {
+    return null;
+  }
+
+  const samplePadding = Math.max(2, Math.round(Math.min(sampleWidth, sampleHeight) * 0.006));
+  const paddedLeft = Math.max(0, left - samplePadding);
+  const paddedTop = Math.max(0, top - samplePadding);
+  const paddedRight = Math.min(sampleWidth - 1, right + samplePadding);
+  const paddedBottom = Math.min(sampleHeight - 1, bottom + samplePadding);
+  const inverseScale = 1 / scale;
+  const x = Math.max(0, Math.floor(paddedLeft * inverseScale));
+  const y = Math.max(0, Math.floor(paddedTop * inverseScale));
+  const width = Math.min(naturalWidth - x, Math.ceil((paddedRight - paddedLeft + 1) * inverseScale));
+  const height = Math.min(naturalHeight - y, Math.ceil((paddedBottom - paddedTop + 1) * inverseScale));
+
+  if (width <= 0 || height <= 0) {
+    return null;
+  }
+
+  return { x, y, width, height };
+}
+
+function countVisiblePixelsInRow(data, width, row) {
+  let count = 0;
+  const offset = row * width * 4;
+
+  for (let column = 0; column < width; column += 1) {
+    if (isVisibleStudentCardPixel(data, offset + (column * 4))) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function countVisiblePixelsInColumn(data, width, height, column) {
+  let count = 0;
+
+  for (let row = 0; row < height; row += 1) {
+    const offset = ((row * width) + column) * 4;
+    if (isVisibleStudentCardPixel(data, offset)) {
+      count += 1;
+    }
+  }
+
+  return count;
+}
+
+function isVisibleStudentCardPixel(data, offset) {
+  const alpha = data[offset + 3];
+  if (alpha < 10) {
+    return false;
+  }
+
+  const red = data[offset];
+  const green = data[offset + 1];
+  const blue = data[offset + 2];
+  const brightest = Math.max(red, green, blue);
+  const darkest = Math.min(red, green, blue);
+  const luminance = (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
+
+  return brightest > 26 || (luminance > 20 && (brightest - darkest) > 8);
+}
+
 function hasCompletedRegistration(uploads, profile) {
   const scheduleUploads = (uploads || []).filter((item) => item.documentType !== DOCUMENT_TYPES.studentCard);
   const studentCardUpload = getPrimaryStudentCardUploadFromUploads(uploads);
@@ -2203,6 +2432,8 @@ async function openUpload(uploadId, options = {}) {
         return;
       }
 
+      const preparedSource = await prepareStudentCardInlineSource(externalUrl);
+
       setState({
         openingUploadId: "",
         uploadMessage: "ID digital carregado dentro do app.",
@@ -2211,8 +2442,8 @@ async function openUpload(uploadId, options = {}) {
         documentViewer: {
           uploadId,
           title: record.originalName,
-          objectUrl: "",
-          externalUrl,
+          objectUrl: preparedSource.objectUrl,
+          externalUrl: preparedSource.externalUrl,
           documentType: record.documentType,
           sourceTab,
           sourceAgendaTab,
