@@ -1,4 +1,30 @@
 import { extractScaPdfData } from "./sca-parser.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/12.7.0/firebase-app.js";
+import {
+  createUserWithEmailAndPassword,
+  getAuth,
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-auth.js";
+import {
+  collection,
+  doc,
+  getFirestore,
+  onSnapshot,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-firestore.js";
+import {
+  getDownloadURL,
+  getStorage,
+  ref as storageRef,
+  uploadBytesResumable,
+} from "https://www.gstatic.com/firebasejs/12.7.0/firebase-storage.js";
 
 const APP_NAME = "Agenda DAGV";
 const APP_MARK = "DAGV";
@@ -92,9 +118,19 @@ const defaultMenu = [
 
 const appElement = document.getElementById("app");
 const uiState = loadUiState();
+const firebaseConfig = window.UFTM_FIREBASE_CONFIG || {};
+const firebaseReady = hasFirebaseConfig(firebaseConfig);
+const canUseFirebaseAuth = window.location.protocol !== "file:";
+const services = {
+  firebaseApp: null,
+  auth: null,
+  db: null,
+  storage: null,
+};
 let localDbPromise = null;
-let persistentUploadsAvailable = true;
 let persistentUploadsIssue = "";
+let unsubscribeProfile = null;
+let unsubscribeUploads = null;
 
 let state = {
   activeTab: uiState.activeTab || "home",
@@ -103,8 +139,11 @@ let state = {
   menu: Array.isArray(uiState.menu) && uiState.menu.length ? uiState.menu : defaultMenu,
   lastMenuSync: uiState.lastMenuSync || "",
   syncMessage: uiState.syncMessage || "Buscando o cardápio da Abadia para o painel do DA.",
-  authChecking: true,
+  firebaseReady,
+  canUseFirebaseAuth,
+  authChecking: firebaseReady && canUseFirebaseAuth,
   authError: "",
+  authMode: uiState.authMode || "signin",
   user: null,
   profile: null,
   uploads: [],
@@ -114,6 +153,7 @@ let state = {
   openingUploadId: "",
   draftName: uiState.draftName || "",
   draftEmail: uiState.draftEmail || "",
+  draftPassword: "",
   portalContent: {},
   newsFeed: [],
   portalLoadingTab: "",
@@ -125,65 +165,169 @@ appElement.addEventListener("change", onChange);
 appElement.addEventListener("input", onInput);
 
 init().catch((error) => {
-  console.error("Falha ao iniciar o painel local do DAGV.", error);
+  console.error("Falha ao iniciar o painel online do DAGV.", error);
   appElement.innerHTML = renderStartupFailure(error);
 });
 
 async function init() {
   render();
-
-  try {
-    await openLocalDb();
-  } catch (error) {
-    persistentUploadsAvailable = false;
-    persistentUploadsIssue = describeLocalError(error);
-  }
-
-  try {
-    await restoreLocalSession();
-  } catch (error) {
-    setState({
-      authChecking: false,
-      authError: `Não consegui abrir o perfil local deste aparelho: ${describeLocalError(error)}`,
-    });
-  }
-
   loadPortalTab("home", true);
   refreshRuMenu(true);
-}
 
-async function restoreLocalSession() {
-  const session = loadSession();
-  if (!session) {
+  if (!firebaseReady) {
     setState({
       authChecking: false,
-      authError: persistentUploadsAvailable ? "" : buildSessionStorageMessage(),
-      syncMessage: persistentUploadsAvailable
-        ? "Painel do DA pronto. Abra seu perfil neste aparelho para enviar o PDF do SCA."
-        : "Painel do DA pronto em modo de sessão. Abra seu perfil para importar o PDF mesmo sem armazenamento persistente.",
+      authError: "Preencha o arquivo firebase-config.js para habilitar login com email/senha e PDFs privados na nuvem.",
     });
     return;
   }
 
-  const profile = ensureStoredProfile(session);
-  const uploads = persistentUploadsAvailable
-    ? mergeUploads(await listUploadsForUser(session.uid), getTransientUploadsForUser(session.uid))
-    : getSessionUploadsForUser(session.uid);
-  const nextProfile = ensureActiveUploadProfile(profile, uploads);
+  if (!canUseFirebaseAuth) {
+    setState({
+      authChecking: false,
+      authError: "Abra o app em http://localhost:4173 ou no deploy para autenticar com email e senha.",
+    });
+    return;
+  }
+
+  try {
+    services.firebaseApp = initializeApp(firebaseConfig);
+    services.auth = getAuth(services.firebaseApp);
+    services.db = getFirestore(services.firebaseApp);
+    services.storage = getStorage(services.firebaseApp);
+    onAuthStateChanged(services.auth, handleAuthStateChange);
+  } catch (error) {
+    setState({
+      authChecking: false,
+      authError: `Não consegui inicializar a conta online: ${describeFirebaseError(error)}`,
+    });
+  }
+}
+
+async function handleAuthStateChange(user) {
+  stopUserSubscriptions();
+
+  if (!user) {
+    setState({
+      authChecking: false,
+      user: null,
+      profile: null,
+      uploads: [],
+      uploadMessage: "",
+      uploadError: "",
+      draftPassword: "",
+    });
+    return;
+  }
+
+  const userData = {
+    uid: user.uid,
+    displayName: user.displayName || "",
+    email: user.email || "",
+    photoURL: user.photoURL || "",
+    provider: "firebase-email-password",
+  };
 
   setState({
     authChecking: false,
-    authError: persistentUploadsAvailable ? "" : buildSessionStorageMessage(),
-    user: session,
-    profile: nextProfile,
-    uploads,
+    authError: "",
+    user: userData,
+    profile: null,
+    uploads: [],
+    draftPassword: "",
     uploadError: "",
-    uploadMessage: uploads.length
-      ? "Perfil restaurado com seus arquivos salvos neste aparelho."
-      : persistentUploadsAvailable
-        ? "Perfil restaurado. Envie o primeiro PDF do SCA."
-        : "Perfil restaurado em modo de sessão. O PDF ficará disponível até recarregar a página.",
+    uploadMessage: "Conta conectada com sucesso.",
   });
+
+  try {
+    await setDoc(
+      doc(services.db, "users", user.uid),
+      {
+        displayName: user.displayName || state.draftName || "",
+        email: user.email || "",
+        photoURL: user.photoURL || "",
+        lastLoginAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
+  } catch (error) {
+    setState({
+      uploadError: `Não consegui sincronizar o perfil do aluno: ${describeFirebaseError(error)}`,
+      uploadMessage: "",
+    });
+  }
+
+  unsubscribeProfile = onSnapshot(
+    doc(services.db, "users", user.uid),
+    (snapshot) => {
+      const profile = snapshot.exists() ? { uid: user.uid, ...snapshot.data() } : { uid: user.uid };
+      setState({
+        profile,
+        user: {
+          ...state.user,
+          displayName: profile.displayName || user.displayName || user.email || "Aluno",
+          email: profile.email || user.email || "",
+          photoURL: profile.photoURL || user.photoURL || "",
+        },
+      });
+    },
+    (error) => {
+      setState({
+        uploadError: `Não consegui carregar o perfil salvo: ${describeFirebaseError(error)}`,
+        uploadMessage: "",
+      });
+    },
+  );
+
+  unsubscribeUploads = onSnapshot(
+    query(collection(services.db, "users", user.uid, "uploads"), orderBy("uploadedAtClient", "desc")),
+    (snapshot) => {
+      const uploads = snapshot.docs.map((item) => {
+        const data = item.data();
+        return {
+          id: item.id,
+          ownerUid: data.ownerUid || user.uid,
+          originalName: data.originalName || "PDF sem nome",
+          normalizedName: data.normalizedName || "",
+          storagePath: data.storagePath || "",
+          size: Number(data.size || 0),
+          contentType: data.contentType || "application/pdf",
+          status: data.status || "uploaded",
+          parserStatus: data.parserStatus || "",
+          uploadedAtClient: data.uploadedAtClient || "",
+          updatedAt: timestampToIso(data.updatedAt) || data.uploadedAtClient || "",
+          notes: data.notes || "",
+          academicData: data.academicData || null,
+        };
+      });
+
+      setState({
+        uploads,
+        activeTab: uploads.length ? state.activeTab : "academic",
+        agendaTab: uploads.length ? state.agendaTab : "sca",
+      });
+    },
+    (error) => {
+      setState({
+        uploadError: `Não consegui carregar os PDFs desta conta: ${describeFirebaseError(error)}`,
+        uploadMessage: "",
+      });
+    },
+  );
+}
+
+function stopUserSubscriptions() {
+  if (typeof unsubscribeProfile === "function") {
+    unsubscribeProfile();
+    unsubscribeProfile = null;
+  }
+
+  if (typeof unsubscribeUploads === "function") {
+    unsubscribeUploads();
+    unsubscribeUploads = null;
+  }
 }
 
 function render() {
@@ -251,7 +395,7 @@ function render() {
             </div>
           </div>
           <div class="metrics-grid">
-            ${metric("PDFs salvos", String(totalUploads), "arquivos guardados neste aparelho")}
+            ${metric("PDFs salvos", String(totalUploads), "arquivos vinculados à sua conta")}
             ${metric("Disciplinas", String(disciplineCount), disciplineCount ? "lidas do PDF" : "aguardando importação")}
             ${metric("Aulas", String(classCount), classCount ? "blocos encontrados" : "horários ainda indisponíveis")}
             ${metric("Hoje", String(todayClasses.length), nextClass ? `próxima: ${nextClass.startTime}` : "sem aula futura no recorte")}
@@ -269,40 +413,58 @@ function render() {
 }
 
 function renderLogin() {
-  const canLogin = !state.authChecking;
-  const loginLabel = state.authChecking ? "Abrindo armazenamento local..." : "Entrar neste aparelho";
-  const setupTitle = state.authChecking
-    ? "Preparando o painel local do DA."
-    : "Crie um perfil local do aluno para usar horários, RU e SCA sem depender de serviço pago.";
+  const canLogin = !state.authChecking && state.firebaseReady && state.canUseFirebaseAuth;
+  const isSignup = state.authMode === "signup";
+  const loginLabel = state.authChecking
+    ? (isSignup ? "Criando conta..." : "Entrando...")
+    : (isSignup ? "Criar conta" : "Entrar com email");
+  const setupTitle = !state.firebaseReady
+    ? "Configure o Firebase para habilitar conta online, PDFs privados e agenda sincronizada."
+    : !state.canUseFirebaseAuth
+      ? "Abra o app em http://localhost:4173 ou no deploy para usar autenticação com email e senha."
+      : isSignup
+        ? "Crie uma conta do aluno para guardar PDFs do SCA na nuvem e acessar de qualquer aparelho."
+        : "Entre com email e senha para acessar seus PDFs e a agenda acadêmica em qualquer aparelho.";
 
   return `
     <div class="login-layout">
       <section class="login-card">
         <span class="eyebrow">Painel do DA</span>
-        <h1>${APP_NAME}, pronto para guardar o PDF do SCA no aparelho.</h1>
+        <h1>${APP_NAME}, com login e PDFs privados na nuvem.</h1>
         <p>${escape(setupTitle)}</p>
+        <div class="button-row" style="margin-top: 1rem;">
+          <button class="${isSignup ? "ghost" : "secondary"}" data-action="set-auth-mode" data-mode="signin">Entrar</button>
+          <button class="${isSignup ? "secondary" : "ghost"}" data-action="set-auth-mode" data-mode="signup">Criar conta</button>
+        </div>
         <div class="form-grid">
-          <div class="inline-field">
-            <label for="loginName">Nome do aluno</label>
-            <input id="loginName" type="text" value="${escapeAttribute(state.draftName)}" placeholder="Ex.: Ana Elisa" />
-          </div>
+          ${isSignup ? `
+            <div class="inline-field">
+              <label for="loginName">Nome do aluno</label>
+              <input id="loginName" type="text" value="${escapeAttribute(state.draftName)}" placeholder="Ex.: Ana Elisa" />
+            </div>
+          ` : ""}
           <div class="inline-field">
             <label for="loginEmail">E-mail do aluno</label>
             <input id="loginEmail" type="email" value="${escapeAttribute(state.draftEmail)}" placeholder="nome@uftm.edu.br" />
           </div>
+          <div class="inline-field">
+            <label for="loginPassword">Senha</label>
+            <input id="loginPassword" type="password" value="${escapeAttribute(state.draftPassword)}" placeholder="mínimo de 6 caracteres" />
+          </div>
         </div>
         <div class="login-actions" style="margin-top: 1rem;">
-          <button class="cta" data-action="login-local" ${canLogin ? "" : "disabled"}>${escape(loginLabel)}</button>
+          <button class="cta" data-action="submit-auth" ${canLogin ? "" : "disabled"}>${escape(loginLabel)}</button>
+          ${isSignup ? "" : `<button class="ghost" data-action="reset-password" ${canLogin ? "" : "disabled"}>Redefinir senha</button>`}
           <a class="ghost link-button" href="${escapeAttribute(DA_PORTAL_URL)}" target="_blank" rel="noreferrer">Portal do DA</a>
           <button class="ghost" data-action="sync-ru">Atualizar RU</button>
         </div>
         <div class="toast ${state.authError ? "is-warning" : ""}" style="margin-top: 1rem;">
-          ${escape(state.authError || state.syncMessage || "Os dados do aluno e os PDFs ficarão salvos localmente neste navegador.")}
+          ${escape(state.authError || state.syncMessage || "A senha fica no Firebase Authentication. Os PDFs privados ficam no Storage da sua conta.")}
         </div>
         <div class="facts-grid" style="margin-top: 1.25rem;">
-          <div class="fact"><strong>Sem calção</strong><p>não depende de serviço pago</p></div>
+          <div class="fact"><strong>Conta online</strong><p>login com email e senha</p></div>
           <div class="fact"><strong>Do DA</strong><p>marca e entrada centralizadas no diretório</p></div>
-          <div class="fact"><strong>Local</strong><p>perfil e PDFs ficam no aparelho</p></div>
+          <div class="fact"><strong>PDF privado</strong><p>guardado na nuvem da conta</p></div>
         </div>
       </section>
 
@@ -310,17 +472,17 @@ function renderLogin() {
         <span class="eyebrow">Identidade DAGV</span>
         <h2 class="preview-title">Horários, RU e SCA reunidos em um painel do DA.</h2>
         <p class="preview-copy">
-          O aluno entra neste navegador, envia o PDF real do SCA e acompanha agenda, semana e RU em uma interface pensada para o diretório acadêmico.
+          O aluno entra com email e senha, envia o PDF real do SCA e acompanha agenda, semana e RU em uma interface pensada para o diretório acadêmico.
         </p>
         <div class="pill-grid">
           <div class="preview-pill"><strong>Painel do DA</strong><span>atalho direto para o portal estudantil</span></div>
-          <div class="preview-pill"><strong>PDF local</strong><span>armazenado com IndexedDB no aparelho</span></div>
+          <div class="preview-pill"><strong>PDF privado</strong><span>armazenado no Firebase Storage</span></div>
           <div class="preview-pill"><strong>Agenda real</strong><span>horários e disciplinas saem do SCA</span></div>
         </div>
         <div class="mini-stack">
-          <div class="mini-card"><small>Passo 1</small><strong>Entrar</strong><span>use nome e e-mail do aluno</span></div>
-          <div class="mini-card"><small>Passo 2</small><strong>Enviar PDF</strong><span>o arquivo fica salvo no aparelho</span></div>
-          <div class="mini-card"><small>Passo 3</small><strong>Acompanhar o dia</strong><span>aulas e RU ficam prontos após a leitura</span></div>
+          <div class="mini-card"><small>Passo 1</small><strong>Entrar</strong><span>use email e senha do aluno</span></div>
+          <div class="mini-card"><small>Passo 2</small><strong>Enviar PDF</strong><span>o arquivo fica salvo na conta</span></div>
+          <div class="mini-card"><small>Passo 3</small><strong>Acompanhar o dia</strong><span>aulas e RU sincronizam após a leitura</span></div>
         </div>
       </aside>
     </div>
@@ -332,7 +494,7 @@ function renderStartupFailure(error) {
     <div class="login-layout">
       <section class="login-card">
         <span class="eyebrow">Painel do DA</span>
-        <h1>Não consegui iniciar o painel local.</h1>
+        <h1>Não consegui iniciar o painel online.</h1>
         <p>O aplicativo encontrou um erro logo na abertura. Recarregue a página ou abra o portal oficial do diretório.</p>
         <div class="toast is-warning" style="margin-top: 1rem;">
           ${escape(describeLocalError(error))}
@@ -532,7 +694,7 @@ function renderAcademicPanel(activeUpload) {
             <h2 class="section-title">Atualização diária do RU da Abadia</h2>
             <div class="mini-stack" style="margin-top: 1rem;">
               <div class="mini-card"><small>Última publicação oficial</small><strong>${escape(formatShortDateTime(state.menu[0]?.updatedAt))}</strong><span>arquivo da Abadia</span></div>
-              <div class="mini-card"><small>Última verificação</small><strong>${escape(formatShortDateTime(state.lastMenuSync))}</strong><span>atualização do aparelho</span></div>
+              <div class="mini-card"><small>Última verificação</small><strong>${escape(formatShortDateTime(state.lastMenuSync))}</strong><span>atualização do painel</span></div>
               <div class="mini-card"><small>Status</small><strong>${escape(state.syncMessage)}</strong><span>fonte oficial do RU</span></div>
             </div>
           </aside>
@@ -550,7 +712,7 @@ function renderAcademicPanel(activeUpload) {
             <div class="section-topline">Upload SCA</div>
             <h2 class="section-title">Envie o PDF real do aluno</h2>
             <p class="section-copy">
-              O arquivo oficial do SCA fica salvo neste aparelho e, quando reconhecido, preenche a agenda do DA com aulas, semana e disciplinas.
+              O arquivo oficial do SCA fica salvo na conta do aluno e, quando reconhecido, preenche a agenda do DA com aulas, semana e disciplinas.
             </p>
             <div class="upload-drop" style="margin-top: 1rem;">
               <input id="pdfInput" class="file-input" type="file" accept="application/pdf,.pdf" />
@@ -560,8 +722,8 @@ function renderAcademicPanel(activeUpload) {
               </div>
               <ul>
                 <li>Formato esperado: “Relação de Disciplinas por Acadêmico”.</li>
-                <li>Os dados ficam salvos apenas neste aparelho.</li>
-                <li>Se limpar os dados do navegador, será preciso reenviar o arquivo.</li>
+                <li>O PDF fica privado na conta do aluno.</li>
+                <li>Os dados extraídos podem ser acessados em outros aparelhos com o mesmo login.</li>
               </ul>
             </div>
             ${renderUploadStatus()}
@@ -605,13 +767,13 @@ function renderAcademicPanel(activeUpload) {
           </div>
         </section>
         <section class="paper-card">
-          <div class="section-topline">Arquivos do aparelho</div>
-          <h2 class="section-title">PDFs salvos neste perfil local</h2>
+          <div class="section-topline">Arquivos da conta</div>
+          <h2 class="section-title">PDFs salvos na conta do aluno</h2>
           <p class="section-copy">
-            Cada arquivo fica preso a este navegador/aparelho e pode ser definido como o PDF ativo do aluno.
+            Cada arquivo fica vinculado à conta online do aluno e pode ser definido como PDF ativo.
           </p>
           <div class="upload-list" style="margin-top: 1rem;">
-            ${state.uploads.length ? state.uploads.map((item) => renderUploadItem(item, activeUpload)).join("") : `<div class="empty-state">Nenhum PDF enviado ainda. Faça o primeiro upload para vincular o arquivo a este perfil local.</div>`}
+            ${state.uploads.length ? state.uploads.map((item) => renderUploadItem(item, activeUpload)).join("") : `<div class="empty-state">Nenhum PDF enviado ainda. Faça o primeiro upload para vincular o arquivo à conta do aluno.</div>`}
           </div>
         </section>
       </section>
@@ -699,8 +861,7 @@ function renderUploadItem(item, activeUpload) {
         <span class="tag">${escape(getUploadStatusLabel(item))}</span>
       </div>
       <div class="item-meta">
-        <span class="tag">${isActive ? "PDF ativo" : "PDF local"}</span>
-        ${item.isTransient ? `<span class="tag">Só nesta sessão</span>` : ""}
+        <span class="tag">${isActive ? "PDF ativo" : "PDF da conta"}</span>
         <span class="tag">${escape(getExtractionCaption(item))}</span>
       </div>
       <div class="button-row" style="margin-top: 0.75rem;">
@@ -870,13 +1031,27 @@ async function onClick(event) {
     return;
   }
 
-  if (action === "reload-app") {
-    window.location.reload();
+  if (action === "set-auth-mode") {
+    setState({
+      authMode: button.dataset.mode === "signup" ? "signup" : "signin",
+      authError: "",
+      draftPassword: "",
+    });
     return;
   }
 
-  if (action === "login-local") {
-    loginLocal();
+  if (action === "submit-auth") {
+    submitAuth();
+    return;
+  }
+
+  if (action === "reset-password") {
+    resetPassword();
+    return;
+  }
+
+  if (action === "reload-app") {
+    window.location.reload();
     return;
   }
 
@@ -914,6 +1089,14 @@ function onInput(event) {
       draftEmail: event.target.value || "",
       authError: "",
     }, { render: false });
+    return;
+  }
+
+  if (event.target.id === "loginPassword") {
+    setState({
+      draftPassword: event.target.value || "",
+      authError: "",
+    }, { render: false });
   }
 }
 
@@ -928,107 +1111,148 @@ function onChange(event) {
   }
 }
 
-async function loginLocal() {
+async function submitAuth() {
   if (state.authChecking) return;
+
+  if (!state.firebaseReady) {
+    setState({ authError: "Preencha firebase-config.js antes de criar contas online." });
+    return;
+  }
+
+  if (!state.canUseFirebaseAuth) {
+    setState({ authError: "Abra o app em http://localhost:4173 ou no deploy para autenticar com email e senha." });
+    return;
+  }
 
   const displayName = normalizePersonName(state.draftName);
   const email = normalizeEmail(state.draftEmail);
+  const password = String(state.draftPassword || "");
+  const isSignup = state.authMode === "signup";
 
-  if (!displayName) {
-    setState({ authError: "Digite o nome do aluno para abrir o perfil local." });
+  if (isSignup && !displayName) {
+    setState({ authError: "Digite o nome do aluno para criar a conta." });
     return;
   }
 
   if (!isLikelyEmail(email)) {
-    setState({ authError: "Digite um e-mail válido para identificar o aluno neste aparelho." });
+    setState({ authError: "Digite um e-mail válido para a conta do aluno." });
     return;
   }
 
-  const user = {
-    uid: createLocalUid(email),
-    displayName,
-    email,
-    photoURL: "",
-    provider: "local-device",
-  };
+  if (password.length < 6) {
+    setState({ authError: "A senha precisa ter pelo menos 6 caracteres." });
+    return;
+  }
+
+  setState({
+    authChecking: true,
+    authError: "",
+    uploadError: "",
+    uploadMessage: isSignup ? "Criando conta do aluno..." : "Entrando na conta do aluno...",
+  });
 
   try {
-    saveSession(user);
-    const profile = ensureStoredProfile(user);
-    const uploads = persistentUploadsAvailable
-      ? mergeUploads(await listUploadsForUser(user.uid), getTransientUploadsForUser(user.uid))
-      : getSessionUploadsForUser(user.uid);
-    const nextProfile = ensureActiveUploadProfile(profile, uploads);
+    if (isSignup) {
+      const credential = await createUserWithEmailAndPassword(services.auth, email, password);
+
+      if (displayName) {
+        await updateProfile(credential.user, { displayName });
+      }
+
+      await setDoc(
+        doc(services.db, "users", credential.user.uid),
+        {
+          displayName,
+          email,
+          photoURL: "",
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          lastLoginAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+    } else {
+      await signInWithEmailAndPassword(services.auth, email, password);
+    }
 
     setState({
-      authChecking: false,
-      authError: persistentUploadsAvailable ? "" : buildSessionStorageMessage(),
-      user,
-      profile: nextProfile,
-      uploads,
+      authError: "",
+      draftPassword: "",
       uploadError: "",
-      uploadMessage: uploads.length
-        ? "Perfil reencontrado neste aparelho."
-        : persistentUploadsAvailable
-          ? "Perfil criado. Agora envie o PDF oficial do SCA."
-          : "Perfil criado em modo de sessão. O PDF será lido e mantido só até recarregar a página.",
-      activeTab: uploads.length ? state.activeTab : "academic",
-      agendaTab: uploads.length ? state.agendaTab : "sca",
-    });
+      uploadMessage: isSignup ? "Conta criada. Preparando seu painel..." : "Conta conectada. Carregando seus arquivos...",
+    }, { render: false });
   } catch (error) {
-    setState({ authError: `Não consegui abrir o perfil local: ${describeLocalError(error)}` });
+    setState({
+      authChecking: false,
+      authError: describeFirebaseError(error),
+      uploadMessage: "",
+    });
   }
 }
 
-function logout() {
-  clearSession();
+async function resetPassword() {
+  if (!services.auth) return;
+
+  const email = normalizeEmail(state.draftEmail);
+  if (!isLikelyEmail(email)) {
+    setState({ authError: "Digite o e-mail da conta antes de pedir a redefinição." });
+    return;
+  }
+
   setState({
-    authChecking: false,
     authError: "",
-    user: null,
-    profile: null,
-    uploads: [],
-    uploadMessage: "",
     uploadError: "",
-    uploadProgress: 0,
-    openingUploadId: "",
-    activeTab: "home",
-    agendaTab: "today",
-    syncMessage: "Sessão encerrada. Os arquivos continuam guardados neste aparelho.",
+    uploadMessage: `Enviando link de redefinição para ${email}...`,
+  });
+
+  try {
+    await sendPasswordResetEmail(services.auth, email);
+    setState({
+      uploadMessage: `Link de redefinição enviado para ${email}.`,
+      authError: "",
+    });
+  } catch (error) {
+    setState({
+      authError: describeFirebaseError(error),
+      uploadMessage: "",
+    });
+  }
+}
+
+async function logout() {
+  if (!services.auth) return;
+
+  try {
+    stopUserSubscriptions();
+    await signOut(services.auth);
+    setState({
+      authError: "",
+      uploadError: "",
+      uploadMessage: "",
+      uploadProgress: 0,
+      openingUploadId: "",
+      draftPassword: "",
+      activeTab: "home",
+      agendaTab: "today",
+      syncMessage: "Sessão encerrada. Entre novamente para acessar seus PDFs.",
+    });
+  } catch (error) {
+    setState({ authError: `Não consegui encerrar a sessão: ${describeFirebaseError(error)}` });
+  }
+}
+
+function refreshLocalUploads() {
+  if (!state.user) return;
+
+  setState({
+    uploadError: "",
+    uploadMessage: "A lista de PDFs acompanha sua conta em tempo real.",
   });
 }
 
-async function refreshLocalUploads() {
-  if (!state.user) return;
-
-  if (!persistentUploadsAvailable) {
-    setState({
-      uploads: getSessionUploadsForUser(state.user.uid),
-      uploadError: "",
-      uploadMessage: "Este navegador não liberou armazenamento persistente. Mostrando apenas os PDFs desta sessão.",
-    });
-    return;
-  }
-
-  try {
-    const uploads = mergeUploads(await listUploadsForUser(state.user.uid), getTransientUploadsForUser(state.user.uid));
-    const profile = ensureActiveUploadProfile(loadStoredProfile(state.user.uid) || ensureStoredProfile(state.user), uploads);
-    setState({
-      profile,
-      uploads,
-      uploadError: "",
-      uploadMessage: uploads.length
-        ? "Lista local atualizada com os arquivos deste aparelho."
-        : "Ainda não há PDFs salvos para este perfil local.",
-    });
-  } catch (error) {
-    setState({ uploadError: `Não consegui atualizar a lista local: ${describeLocalError(error)}` });
-  }
-}
-
 async function uploadPdf(file, inputElement) {
-  if (!state.user) {
-    setState({ uploadError: "Abra um perfil local antes de enviar o PDF.", uploadMessage: "", uploadProgress: 0 });
+  if (!state.user || !services.db || !services.storage) {
+    setState({ uploadError: "Entre com email e senha antes de enviar o PDF.", uploadMessage: "", uploadProgress: 0 });
     inputElement.value = "";
     return;
   }
@@ -1039,8 +1263,11 @@ async function uploadPdf(file, inputElement) {
     return;
   }
 
-  const uploadId = createUploadId();
+  const uploadId = doc(collection(services.db, "users", state.user.uid, "uploads")).id;
   const uploadedAtClient = new Date().toISOString();
+  const normalizedName = normalizeFileName(file.name);
+  const storagePath = `users/${state.user.uid}/uploads/${uploadId}/${normalizedName}`;
+  const uploadDocRef = doc(services.db, "users", state.user.uid, "uploads", uploadId);
 
   setState({
     uploadError: "",
@@ -1056,106 +1283,133 @@ async function uploadPdf(file, inputElement) {
       studentName: state.user.displayName,
     });
 
-    const record = {
-      id: uploadId,
-      ownerUid: state.user.uid,
-      originalName: file.name,
-      normalizedName: normalizeFileName(file.name),
-      storagePath: `local://${state.user.uid}/${uploadId}/${normalizeFileName(file.name)}`,
-      size: file.size,
-      contentType: file.type || "application/pdf",
-      status: academicData.schedule.length || academicData.disciplines.length ? "processed" : "limited",
-      uploadedAtClient,
-      updatedAt: uploadedAtClient,
-      notes: academicData.schedule.length || academicData.disciplines.length
-        ? "Arquivo importado com sucesso."
-        : "Não consegui ler todos os dados acadêmicos deste arquivo.",
-      academicData,
-      blob: file,
-    };
-    const nextProfile = {
-      ...(loadStoredProfile(state.user.uid) || ensureStoredProfile(state.user)),
-      activeUploadId: uploadId,
-      activeUploadName: file.name,
-      lastUploadAtClient: uploadedAtClient,
-      updatedAt: uploadedAtClient,
-    };
-
     setState({
       uploadProgress: 56,
       uploadMessage: "Organizando horários, disciplinas e dados do aluno...",
       uploadError: "",
     });
 
-    if (persistentUploadsAvailable) {
-      try {
-        await saveUploadRecord(record);
-        setState({
-          uploadProgress: 82,
-          uploadMessage: "Salvando os dados deste aluno neste aparelho...",
-          uploadError: "",
-        });
+    try {
+      await setDoc(
+        uploadDocRef,
+        {
+          ownerUid: state.user.uid,
+          originalName: file.name,
+          normalizedName,
+          storagePath,
+          size: file.size,
+          contentType: file.type || "application/pdf",
+          status: "uploading",
+          parserStatus: "parsed_locally",
+          uploadedAtClient,
+          updatedAt: serverTimestamp(),
+          createdAt: serverTimestamp(),
+          notes: "PDF lido com sucesso e aguardando envio para o Storage.",
+          academicData,
+        },
+        { merge: true },
+      );
 
-        const profile = saveStoredProfile(nextProfile);
-        const uploads = mergeUploads(
-          await listUploadsForUser(state.user.uid),
-          getTransientUploadsForUser(state.user.uid).filter((item) => item.id !== uploadId),
+      await new Promise((resolve, reject) => {
+        const task = uploadBytesResumable(
+          storageRef(services.storage, storagePath),
+          file,
+          { contentType: file.type || "application/pdf" },
         );
 
-        setState({
-          authError: "",
-          profile,
-          uploads,
-          uploadProgress: 100,
-          uploadMessage: academicData.schedule.length || academicData.disciplines.length
-            ? "PDF importado com sucesso. Sua agenda acadêmica já foi preenchida."
-            : "PDF salvo, mas não consegui reconhecer todos os dados acadêmicos.",
-          uploadError: "",
-          referenceDate: suggestReferenceDate(academicData.schedule, state.referenceDate),
-        });
-        return;
-      } catch (storageError) {
-        persistentUploadsAvailable = false;
-        persistentUploadsIssue = describeLocalError(storageError);
+        task.on(
+          "state_changed",
+          (snapshot) => {
+            const progress = snapshot.totalBytes
+              ? Math.max(56, Math.round((snapshot.bytesTransferred / snapshot.totalBytes) * 100))
+              : 56;
+
+            setState({
+              uploadProgress: progress,
+              uploadMessage: `Enviando ${file.name} para a conta do aluno: ${Math.min(progress, 99)}% concluído.`,
+              uploadError: "",
+            });
+          },
+          reject,
+          resolve,
+        );
+      });
+
+      await setDoc(
+        uploadDocRef,
+        {
+          ownerUid: state.user.uid,
+          originalName: file.name,
+          normalizedName,
+          storagePath,
+          size: file.size,
+          contentType: file.type || "application/pdf",
+          status: academicData.schedule.length || academicData.disciplines.length ? "processed" : "limited",
+          parserStatus: "ready",
+          uploadedAtClient,
+          updatedAt: serverTimestamp(),
+          notes: academicData.schedule.length || academicData.disciplines.length
+            ? "PDF enviado e dados acadêmicos sincronizados com a conta."
+            : "PDF enviado, mas com leitura parcial dos dados acadêmicos.",
+          academicData,
+        },
+        { merge: true },
+      );
+
+      await setDoc(
+        doc(services.db, "users", state.user.uid),
+        {
+          displayName: state.user.displayName || academicData.profile?.studentName || "",
+          email: state.user.email || "",
+          photoURL: state.user.photoURL || "",
+          activeUploadId: uploadId,
+          activeUploadName: file.name,
+          lastUploadAtClient: uploadedAtClient,
+          updatedAt: serverTimestamp(),
+          lastLoginAt: serverTimestamp(),
+        },
+        { merge: true },
+      );
+
+      setState({
+        uploadProgress: 100,
+        uploadMessage: academicData.schedule.length || academicData.disciplines.length
+          ? "PDF importado e sincronizado com sucesso na conta do aluno."
+          : "PDF enviado para a conta, mas com reconhecimento parcial dos dados acadêmicos.",
+        uploadError: "",
+        referenceDate: suggestReferenceDate(academicData.schedule, state.referenceDate),
+      });
+    } catch (storageError) {
+      try {
+        await setDoc(
+          uploadDocRef,
+          {
+            ownerUid: state.user.uid,
+            originalName: file.name,
+            normalizedName,
+            storagePath,
+            size: file.size,
+            contentType: file.type || "application/pdf",
+            status: "error",
+            parserStatus: "storage_failed",
+            uploadedAtClient,
+            updatedAt: serverTimestamp(),
+            notes: describeFirebaseError(storageError),
+            academicData,
+          },
+          { merge: true },
+        );
+      } catch (secondaryError) {
+        // Mantemos o erro original para a interface.
       }
+
+      throw storageError;
     }
-
-    let profile = nextProfile;
-    try {
-      profile = saveStoredProfile(nextProfile);
-    } catch (profileError) {
-      // segue com os dados em memória para não descartar a extração já concluída
-    }
-
-    const transientRecord = {
-      ...record,
-      isTransient: true,
-      storagePath: `session://${state.user.uid}/${uploadId}/${normalizeFileName(file.name)}`,
-      notes: academicData.schedule.length || academicData.disciplines.length
-        ? "Arquivo importado para esta sessão."
-        : "Arquivo lido para esta sessão, mas com dados acadêmicos parciais.",
-    };
-    const uploads = mergeUploads(
-      state.uploads.filter((item) => item.ownerUid === state.user.uid && item.id !== uploadId),
-      [transientRecord],
-    );
-
-    setState({
-      authError: buildSessionStorageMessage(),
-      profile,
-      uploads,
-      uploadProgress: 100,
-      uploadMessage: academicData.schedule.length || academicData.disciplines.length
-        ? "PDF lido com sucesso. A agenda foi preenchida, mas o arquivo ficará disponível só nesta sessão."
-        : "PDF lido nesta sessão, mas com reconhecimento parcial dos dados acadêmicos.",
-      uploadError: "",
-      referenceDate: suggestReferenceDate(academicData.schedule, state.referenceDate),
-    });
   } catch (error) {
     setState({
       uploadProgress: 0,
       uploadMessage: "",
-      uploadError: `Não consegui importar este PDF do SCA: ${describeLocalError(error)}`,
+      uploadError: `Não consegui importar este PDF do SCA: ${describeFirebaseError(error)}`,
     });
   } finally {
     inputElement.value = "";
@@ -1175,7 +1429,7 @@ async function parseAcademicPdf(file, fallbackProfile) {
     return await extractScaPdfData(file, fallbackProfile);
   } catch (deviceError) {
     if (serverError) {
-      throw new Error(`servidor: ${describeLocalError(serverError)}; aparelho: ${describeLocalError(deviceError)}`);
+      throw new Error(`servidor: ${describeLocalError(serverError)}; navegador: ${describeLocalError(deviceError)}`);
     }
     throw deviceError;
   }
@@ -1238,58 +1492,61 @@ async function loadPortalTab(tab, silent = false) {
   }
 }
 
-function setActiveUpload(uploadId) {
-  if (!state.user || !uploadId) return;
+async function setActiveUpload(uploadId) {
+  if (!state.user || !uploadId || !services.db) return;
 
   const upload = state.uploads.find((item) => item.id === uploadId);
   if (!upload) return;
 
-  const profile = saveStoredProfile({
-    ...(loadStoredProfile(state.user.uid) || ensureStoredProfile(state.user)),
-    activeUploadId: upload.id,
-    activeUploadName: upload.originalName,
-    updatedAt: new Date().toISOString(),
-  });
+  try {
+    await setDoc(
+      doc(services.db, "users", state.user.uid),
+      {
+        activeUploadId: upload.id,
+        activeUploadName: upload.originalName,
+        updatedAt: serverTimestamp(),
+      },
+      { merge: true },
+    );
 
-  setState({
-    profile,
-    uploadMessage: `${upload.originalName} agora é o PDF ativo deste perfil local.`,
-    uploadError: "",
-  });
+    setState({
+      uploadMessage: `${upload.originalName} agora é o PDF ativo desta conta.`,
+      uploadError: "",
+    });
+  } catch (error) {
+    setState({
+      uploadError: `Não consegui definir o PDF ativo: ${describeFirebaseError(error)}`,
+      uploadMessage: "",
+    });
+  }
 }
 
 async function openUpload(uploadId) {
   if (!uploadId) return;
 
   const popup = window.open("", "_blank", "noopener");
-  setState({ openingUploadId: uploadId, uploadError: "", uploadMessage: "Abrindo o PDF salvo localmente..." });
+  setState({ openingUploadId: uploadId, uploadError: "", uploadMessage: "Abrindo o PDF da conta..." });
 
   try {
-    const transientRecord = state.uploads.find((item) => item.id === uploadId && item.blob);
-    const record = transientRecord || await getUploadRecord(uploadId);
-    if (!record || !record.blob) {
-      throw new Error("arquivo não encontrado no armazenamento local");
+    const record = state.uploads.find((item) => item.id === uploadId);
+    if (!record || !record.storagePath || !services.storage) {
+      throw new Error("arquivo não encontrado no armazenamento da conta");
     }
 
-    const url = URL.createObjectURL(record.blob);
+    const url = await getDownloadURL(storageRef(services.storage, record.storagePath));
 
     if (popup) {
       popup.location.href = url;
     } else {
-      const link = document.createElement("a");
-      link.href = url;
-      link.target = "_blank";
-      link.rel = "noopener";
-      link.click();
+      window.open(url, "_blank", "noopener");
     }
 
-    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
     setState({ openingUploadId: "", uploadMessage: `${record.originalName} aberto em nova aba.`, uploadError: "" });
   } catch (error) {
     if (popup) popup.close();
     setState({
       openingUploadId: "",
-      uploadError: `Não consegui abrir o PDF local: ${describeLocalError(error)}`,
+      uploadError: `Não consegui abrir o PDF: ${describeFirebaseError(error)}`,
       uploadMessage: "",
     });
   }
@@ -1339,7 +1596,7 @@ function buildHeroTitle(activeUpload, academicData, todayClasses, nextClass) {
 
 function buildHeroSubtitle(academicData) {
   if (!academicData) {
-    return "Entre no perfil local do aluno, envie o PDF oficial do SCA e acompanhe a agenda do DA diretamente neste aparelho.";
+    return "Entre na conta do aluno, envie o PDF oficial do SCA e acompanhe a agenda do DA em qualquer aparelho.";
   }
 
   const pieces = [
@@ -1379,16 +1636,58 @@ function getExtractionCaption(upload) {
 
 function getUploadStatusLabel(upload) {
   if (!upload) return "Sem arquivo";
-  if (upload.isTransient && upload.status === "processed") return "Importado";
-  if (upload.isTransient && upload.status === "limited") return "Parcial";
   if (upload.status === "processed") return "Importado";
   if (upload.status === "limited") return "Importado parcialmente";
+  if (upload.status === "uploading") return "Enviando";
+  if (upload.status === "error") return "Falhou";
   if (upload.status === "uploaded") return "Salvo";
   return upload.status || "Salvo";
 }
 
 function getStatusMessage() {
   return state.uploadError || state.authError || state.uploadMessage || state.syncMessage;
+}
+
+function hasFirebaseConfig(config) {
+  return [
+    config.apiKey,
+    config.authDomain,
+    config.projectId,
+    config.storageBucket,
+    config.messagingSenderId,
+    config.appId,
+  ].every((value) => value && !String(value).includes("PREENCHA") && !String(value).includes("SEU-PROJETO"));
+}
+
+function describeFirebaseError(error) {
+  const code = String(error?.code || "");
+  const fallback = error?.message || describeLocalError(error);
+
+  const knownErrors = {
+    "auth/invalid-email": "o e-mail informado não é válido",
+    "auth/email-already-in-use": "já existe uma conta com este e-mail",
+    "auth/invalid-credential": "e-mail ou senha inválidos",
+    "auth/user-not-found": "não encontrei uma conta com este e-mail",
+    "auth/wrong-password": "senha incorreta",
+    "auth/weak-password": "a senha é fraca demais; use pelo menos 6 caracteres",
+    "auth/too-many-requests": "muitas tentativas seguidas; aguarde um pouco e tente novamente",
+    "auth/network-request-failed": "não consegui falar com o Firebase agora; confira a conexão",
+    "auth/missing-password": "digite a senha da conta",
+    "auth/operation-not-allowed": "habilite Email/Password em Authentication > Sign-in method no Firebase",
+    "auth/unauthorized-domain": "adicione este domínio em Authentication > Settings > Authorized domains no Firebase",
+    "storage/unauthorized": "as regras do Firebase Storage não permitem este upload para o utilizador atual",
+    "storage/object-not-found": "não encontrei o PDF no armazenamento da conta",
+    "permission-denied": "as regras do Firestore não permitem esta operação para o utilizador atual",
+  };
+
+  return knownErrors[code] || fallback;
+}
+
+function timestampToIso(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value.toDate === "function") return value.toDate().toISOString();
+  return "";
 }
 
 function renderMissingPdfState(message) {
@@ -1534,6 +1833,7 @@ function persistUiState() {
       menu: state.menu,
       lastMenuSync: state.lastMenuSync,
       syncMessage: state.syncMessage,
+      authMode: state.authMode,
       draftName: state.draftName,
       draftEmail: state.draftEmail,
     }),
