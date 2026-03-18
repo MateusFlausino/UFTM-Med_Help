@@ -30,11 +30,77 @@ create table if not exists public.uploads (
   academic_data jsonb
 );
 
+create table if not exists public.admin_users (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  role text not null default 'admin',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.admin_announcements (
+  id uuid primary key default gen_random_uuid(),
+  category text not null default 'daily_notice',
+  title text not null,
+  body text not null default '',
+  action_label text not null default '',
+  action_url text not null default '',
+  starts_at timestamptz,
+  ends_at timestamptz,
+  is_published boolean not null default true,
+  created_by uuid references auth.users(id) on delete set null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint admin_announcements_category_check
+    check (category in ('daily_notice', 'party_announcement'))
+);
+
+create table if not exists public.user_preferences (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  notifications_enabled boolean not null default false,
+  notification_permission text not null default 'default',
+  installation_status text not null default 'browser',
+  subscribed_at timestamptz,
+  last_seen_at timestamptz not null default now(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint user_preferences_notification_permission_check
+    check (notification_permission in ('default', 'granted', 'denied')),
+  constraint user_preferences_installation_status_check
+    check (installation_status in ('browser', 'standalone', 'unsupported'))
+);
+
 create index if not exists uploads_owner_uid_uploaded_at_idx
   on public.uploads (owner_uid, uploaded_at_client desc);
 
+create index if not exists admin_announcements_category_published_idx
+  on public.admin_announcements (category, is_published, starts_at desc, created_at desc);
+
+create index if not exists user_preferences_last_seen_idx
+  on public.user_preferences (last_seen_at desc);
+
+create or replace function public.is_admin()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.admin_users
+    where user_id = auth.uid()
+      and is_active
+  );
+$$;
+
+grant execute on function public.is_admin() to authenticated;
+
 alter table public.profiles enable row level security;
 alter table public.uploads enable row level security;
+alter table public.admin_users enable row level security;
+alter table public.admin_announcements enable row level security;
+alter table public.user_preferences enable row level security;
 
 drop policy if exists profiles_select_own on public.profiles;
 create policy profiles_select_own
@@ -57,6 +123,13 @@ create policy profiles_update_own
   to authenticated
   using (auth.uid() = id)
   with check (auth.uid() = id);
+
+drop policy if exists profiles_select_admin on public.profiles;
+create policy profiles_select_admin
+  on public.profiles
+  for select
+  to authenticated
+  using (public.is_admin());
 
 drop policy if exists uploads_select_own on public.uploads;
 create policy uploads_select_own
@@ -86,6 +159,78 @@ create policy uploads_delete_own
   for delete
   to authenticated
   using (auth.uid() = owner_uid);
+
+drop policy if exists uploads_select_admin on public.uploads;
+create policy uploads_select_admin
+  on public.uploads
+  for select
+  to authenticated
+  using (public.is_admin());
+
+drop policy if exists admin_users_select_own on public.admin_users;
+create policy admin_users_select_own
+  on public.admin_users
+  for select
+  to authenticated
+  using (auth.uid() = user_id);
+
+drop policy if exists admin_announcements_select_published on public.admin_announcements;
+create policy admin_announcements_select_published
+  on public.admin_announcements
+  for select
+  to authenticated
+  using (is_published or public.is_admin());
+
+drop policy if exists admin_announcements_insert_admin on public.admin_announcements;
+create policy admin_announcements_insert_admin
+  on public.admin_announcements
+  for insert
+  to authenticated
+  with check (public.is_admin());
+
+drop policy if exists admin_announcements_update_admin on public.admin_announcements;
+create policy admin_announcements_update_admin
+  on public.admin_announcements
+  for update
+  to authenticated
+  using (public.is_admin())
+  with check (public.is_admin());
+
+drop policy if exists admin_announcements_delete_admin on public.admin_announcements;
+create policy admin_announcements_delete_admin
+  on public.admin_announcements
+  for delete
+  to authenticated
+  using (public.is_admin());
+
+drop policy if exists user_preferences_select_own on public.user_preferences;
+create policy user_preferences_select_own
+  on public.user_preferences
+  for select
+  to authenticated
+  using (auth.uid() = user_id);
+
+drop policy if exists user_preferences_select_admin on public.user_preferences;
+create policy user_preferences_select_admin
+  on public.user_preferences
+  for select
+  to authenticated
+  using (public.is_admin());
+
+drop policy if exists user_preferences_insert_own on public.user_preferences;
+create policy user_preferences_insert_own
+  on public.user_preferences
+  for insert
+  to authenticated
+  with check (auth.uid() = user_id);
+
+drop policy if exists user_preferences_update_own on public.user_preferences;
+create policy user_preferences_update_own
+  on public.user_preferences
+  for update
+  to authenticated
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
 insert into storage.buckets (id, name, public)
 values ('student-pdfs', 'student-pdfs', false)

@@ -8,6 +8,7 @@ const SUPABASE_CONFIG_FILE = "supabase-config.js";
 const SUPABASE_BUCKET = "student-pdfs";
 const REGISTRATION_TAB_ID = "registration";
 const DOCUMENT_VIEWER_TAB_ID = "document-viewer";
+const ADMIN_TAB_ID = "admin";
 const MENU_AUTO_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
 const CLASS_NOTIFICATION_LEAD_MINUTES = 10;
 const NOTIFICATION_PROMPT_STORAGE_KEY = "uftm-mobile-notification-prompt-v1";
@@ -16,6 +17,10 @@ const NOTIFICATION_LOOKAHEAD_DAYS = 21;
 const DOCUMENT_TYPES = {
   schedule: "schedule",
   studentCard: "student_card",
+};
+const ANNOUNCEMENT_CATEGORIES = {
+  dailyNotice: "daily_notice",
+  partyAnnouncement: "party_announcement",
 };
 const PENDING_REGISTRATION_MESSAGE = "Aguardando finalização do cadastro. Envie a grade horária e o link da carteirinha estudantil para liberar o app.";
 
@@ -156,6 +161,15 @@ let state = {
   newsFeed: [],
   portalLoadingTab: "",
   portalError: "",
+  isAdmin: false,
+  adminRole: "",
+  announcements: [],
+  announcementsLoading: false,
+  announcementsError: "",
+  adminLoading: false,
+  adminError: "",
+  adminStats: createEmptyAdminStats(),
+  adminDraft: createEmptyAdminDraft(),
 };
 
 appElement.addEventListener("click", onClick);
@@ -247,11 +261,21 @@ async function handleSupabaseSession(session) {
       agendaTab: "today",
       sidebarOpen: false,
       documentViewer: createEmptyDocumentViewerState(),
+      isAdmin: false,
+      adminRole: "",
+      announcements: [],
+      announcementsLoading: false,
+      announcementsError: "",
+      adminLoading: false,
+      adminError: "",
+      adminStats: createEmptyAdminStats(),
+      adminDraft: createEmptyAdminDraft(),
     });
     return;
   }
 
   const userData = normalizeSupabaseUser(user);
+  const configuredAdminAccess = resolveConfiguredAdminAccess(userData);
 
   setState({
     authChecking: false,
@@ -269,11 +293,29 @@ async function handleSupabaseSession(session) {
     studentCardUrlDraft: "",
     uploadError: "",
     uploadMessage: "Conta Google conectada com sucesso.",
+    isAdmin: configuredAdminAccess.isAdmin,
+    adminRole: configuredAdminAccess.role,
+    announcements: [],
+    announcementsLoading: true,
+    announcementsError: "",
+    adminLoading: configuredAdminAccess.isAdmin,
+    adminError: "",
+    adminStats: createEmptyAdminStats(),
+    adminDraft: createEmptyAdminDraft(),
   });
 
   try {
     await upsertSupabaseProfile(userData);
-    const { profile, uploads } = await loadRemoteAccountData(userData.uid);
+    const [{ profile, uploads }, adminAccess, announcementsResult] = await Promise.all([
+      loadRemoteAccountData(userData.uid),
+      resolveAdminAccess(userData),
+      loadAnnouncements(),
+    ]);
+    const resolvedAdminAccess = adminAccess.isAdmin ? adminAccess : configuredAdminAccess;
+    const registrationComplete = hasCompletedRegistration(uploads, profile);
+    const nextActiveTab = !resolvedAdminAccess.isAdmin && state.activeTab === ADMIN_TAB_ID
+      ? "home"
+      : state.activeTab;
 
     setState({
       authChecking: false,
@@ -286,21 +328,36 @@ async function handleSupabaseSession(session) {
       },
       profile,
       uploads,
+      isAdmin: resolvedAdminAccess.isAdmin,
+      adminRole: resolvedAdminAccess.role,
+      announcements: announcementsResult.items,
+      announcementsLoading: false,
+      announcementsError: announcementsResult.error,
+      adminLoading: false,
+      adminError: "",
+      adminStats: createEmptyAdminStats(),
       studentCardUrlDraft: getStudentCardLinkUrl(getPrimaryStudentCardUploadFromUploads(uploads)),
-      activeTab: hasCompletedRegistration(uploads, profile) ? state.activeTab : REGISTRATION_TAB_ID,
-      agendaTab: hasCompletedRegistration(uploads, profile) ? state.agendaTab : "today",
+      activeTab: registrationComplete || resolvedAdminAccess.isAdmin ? nextActiveTab : REGISTRATION_TAB_ID,
+      agendaTab: registrationComplete ? state.agendaTab : "today",
       uploadError: "",
       uploadMessage: uploads.length
-        ? hasCompletedRegistration(uploads, profile)
+        ? registrationComplete
           ? "Conta conectada. Seus documentos privados foram sincronizados."
           : PENDING_REGISTRATION_MESSAGE
         : "Conta conectada. Envie a grade horaria e o link da carteirinha estudantil para liberar o painel.",
     });
+
+    void syncUserPreferences();
+    if (resolvedAdminAccess.isAdmin) {
+      void refreshAdminDashboard(true);
+    }
   } catch (error) {
     setState({
       authChecking: false,
       uploadError: `Não consegui sincronizar o perfil do aluno: ${describeSupabaseError(error)}`,
       uploadMessage: "",
+      announcementsLoading: false,
+      adminLoading: false,
     });
   }
 }
@@ -790,6 +847,388 @@ function createEmptyDocumentViewerState() {
   };
 }
 
+function createEmptyAdminDraft() {
+  return {
+    category: ANNOUNCEMENT_CATEGORIES.dailyNotice,
+    title: "",
+    body: "",
+    startsAt: "",
+    endsAt: "",
+    actionLabel: "",
+    actionUrl: "",
+    isPublished: true,
+  };
+}
+
+function createEmptyAdminStats() {
+  return {
+    totalUsers: 0,
+    activeUsers7d: 0,
+    completedRegistrations: 0,
+    notificationSubscribers: 0,
+    standaloneUsers: 0,
+  };
+}
+
+function isConfiguredAdminEmail(email) {
+  return supabaseConfig.adminEmails.includes(normalizeEmail(email));
+}
+
+function resolveConfiguredAdminAccess(user) {
+  if (!isConfiguredAdminEmail(user?.email || "")) {
+    return { isAdmin: false, role: "" };
+  }
+
+  return {
+    isAdmin: true,
+    role: "bootstrap_admin",
+  };
+}
+
+async function resolveAdminAccess(user) {
+  const fallback = resolveConfiguredAdminAccess(user);
+
+  if (!services.supabase || !user?.uid) {
+    return fallback;
+  }
+
+  try {
+    const { data, error } = await services.supabase
+      .from("admin_users")
+      .select("role,is_active")
+      .eq("user_id", user.uid)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (data?.is_active) {
+      return {
+        isAdmin: true,
+        role: String(data.role || "admin"),
+      };
+    }
+
+    return fallback;
+  } catch (error) {
+    return fallback;
+  }
+}
+
+async function loadAnnouncements() {
+  if (!services.supabase) {
+    return {
+      items: [],
+      error: "",
+    };
+  }
+
+  try {
+    const { data, error } = await services.supabase
+      .from("admin_announcements")
+      .select("*")
+      .order("starts_at", { ascending: false, nullsFirst: false })
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    return {
+      items: (data || []).map(normalizeAdminAnnouncementRow),
+      error: "",
+    };
+  } catch (error) {
+    if (isAdminFeatureUnavailableError(error)) {
+      return {
+        items: [],
+        error: "",
+      };
+    }
+
+    return {
+      items: [],
+      error: `Não consegui carregar os avisos do app: ${describeSupabaseError(error)}`,
+    };
+  }
+}
+
+async function loadAdminStats() {
+  if (!services.supabase) {
+    return {
+      stats: createEmptyAdminStats(),
+      error: "",
+    };
+  }
+
+  try {
+    const sevenDaysAgo = new Date(Date.now() - (7 * 24 * 60 * 60 * 1000)).toISOString();
+    const [totalUsersResult, activeUsersResult, notificationSubscribersResult, standaloneUsersResult, uploadsResult] = await Promise.all([
+      services.supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true }),
+      services.supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .gte("last_login_at", sevenDaysAgo),
+      services.supabase
+        .from("user_preferences")
+        .select("user_id", { count: "exact", head: true })
+        .eq("notifications_enabled", true),
+      services.supabase
+        .from("user_preferences")
+        .select("user_id", { count: "exact", head: true })
+        .eq("installation_status", "standalone"),
+      services.supabase
+        .from("uploads")
+        .select("owner_uid,parser_status,storage_path"),
+    ]);
+
+    const failure = [
+      totalUsersResult.error,
+      activeUsersResult.error,
+      notificationSubscribersResult.error,
+      standaloneUsersResult.error,
+      uploadsResult.error,
+    ].find(Boolean);
+
+    if (failure) {
+      throw failure;
+    }
+
+    return {
+      stats: buildAdminStats({
+        totalUsers: Number(totalUsersResult.count || 0),
+        activeUsers7d: Number(activeUsersResult.count || 0),
+        notificationSubscribers: Number(notificationSubscribersResult.count || 0),
+        standaloneUsers: Number(standaloneUsersResult.count || 0),
+        uploads: uploadsResult.data || [],
+      }),
+      error: "",
+    };
+  } catch (error) {
+    if (isAdminFeatureUnavailableError(error)) {
+      return {
+        stats: createEmptyAdminStats(),
+        error: "Aplique o novo schema.sql no Supabase para liberar métricas e gestão administrativa.",
+      };
+    }
+
+    return {
+      stats: createEmptyAdminStats(),
+      error: `Não consegui carregar as métricas administrativas: ${describeSupabaseError(error)}`,
+    };
+  }
+}
+
+async function refreshAdminDashboard(silent = false) {
+  if (!state.isAdmin || !services.supabase) {
+    return;
+  }
+
+  setState({
+    adminLoading: true,
+    adminError: "",
+  }, { render: !silent });
+
+  const [announcementsResult, statsResult] = await Promise.all([
+    loadAnnouncements(),
+    loadAdminStats(),
+  ]);
+
+  setState({
+    announcements: announcementsResult.items,
+    announcementsLoading: false,
+    announcementsError: announcementsResult.error,
+    adminLoading: false,
+    adminError: statsResult.error || announcementsResult.error,
+    adminStats: statsResult.stats,
+  });
+}
+
+async function syncUserPreferences() {
+  if (!services.supabase || !state.user) {
+    return;
+  }
+
+  try {
+    const permission = resolveNotificationPermissionStatus();
+    const notificationsEnabled = permission === "granted";
+    const now = new Date().toISOString();
+
+    const { error } = await services.supabase
+      .from("user_preferences")
+      .upsert({
+        user_id: state.user.uid,
+        notifications_enabled: notificationsEnabled,
+        notification_permission: permission,
+        installation_status: resolveInstallationStatus(),
+        subscribed_at: notificationsEnabled ? now : null,
+        last_seen_at: now,
+        updated_at: now,
+      }, { onConflict: "user_id" });
+
+    if (error && !isAdminFeatureUnavailableError(error)) {
+      throw error;
+    }
+  } catch (error) {
+    // Preferências de uso não devem bloquear o app do aluno.
+  }
+}
+
+function buildAdminStats({ totalUsers, activeUsers7d, notificationSubscribers, standaloneUsers, uploads }) {
+  const completionMap = new Map();
+
+  for (const row of uploads || []) {
+    const ownerUid = String(row?.owner_uid || "");
+    if (!ownerUid) {
+      continue;
+    }
+
+    const current = completionMap.get(ownerUid) || { hasSchedule: false, hasStudentCard: false };
+    const documentType = inferDocumentTypeFromStoragePath(row?.storage_path, row?.parser_status);
+    if (documentType === DOCUMENT_TYPES.studentCard && String(row?.parser_status || "") === "student_card_link") {
+      current.hasStudentCard = true;
+    } else if (documentType === DOCUMENT_TYPES.schedule) {
+      current.hasSchedule = true;
+    }
+    completionMap.set(ownerUid, current);
+  }
+
+  const completedRegistrations = Array.from(completionMap.values())
+    .filter((item) => item.hasSchedule && item.hasStudentCard)
+    .length;
+
+  return {
+    totalUsers,
+    activeUsers7d,
+    completedRegistrations,
+    notificationSubscribers,
+    standaloneUsers,
+  };
+}
+
+function normalizeAdminAnnouncementRow(row) {
+  return {
+    id: String(row?.id || ""),
+    category: normalizeAnnouncementCategory(row?.category),
+    title: String(row?.title || "Sem título"),
+    body: String(row?.body || ""),
+    actionLabel: String(row?.action_label || ""),
+    actionUrl: normalizeOptionalHttpUrl(row?.action_url || ""),
+    startsAt: String(row?.starts_at || ""),
+    endsAt: String(row?.ends_at || ""),
+    isPublished: Boolean(row?.is_published),
+    createdAt: String(row?.created_at || ""),
+    updatedAt: String(row?.updated_at || ""),
+    createdBy: String(row?.created_by || ""),
+  };
+}
+
+function normalizeAnnouncementCategory(value) {
+  return value === ANNOUNCEMENT_CATEGORIES.partyAnnouncement
+    ? ANNOUNCEMENT_CATEGORIES.partyAnnouncement
+    : ANNOUNCEMENT_CATEGORIES.dailyNotice;
+}
+
+function getAnnouncementCategoryLabel(category) {
+  return category === ANNOUNCEMENT_CATEGORIES.partyAnnouncement
+    ? "Festas"
+    : "Avisos do dia";
+}
+
+function isAnnouncementActive(item, now = new Date()) {
+  if (!item?.isPublished) {
+    return false;
+  }
+
+  const nowTime = now.getTime();
+  const startsAt = item.startsAt ? new Date(item.startsAt).getTime() : Number.NEGATIVE_INFINITY;
+  const endsAt = item.endsAt ? new Date(item.endsAt).getTime() : Number.POSITIVE_INFINITY;
+
+  return nowTime >= startsAt && nowTime <= endsAt;
+}
+
+function getActiveAnnouncementsByCategory(category) {
+  return state.announcements
+    .filter((item) => item.category === category && isAnnouncementActive(item))
+    .sort((left, right) => String(right.startsAt || right.createdAt).localeCompare(String(left.startsAt || left.createdAt)));
+}
+
+function getAnnouncementStatusLabel(item) {
+  if (!item.isPublished) {
+    return "Rascunho";
+  }
+
+  if (isAnnouncementActive(item)) {
+    return "Publicado";
+  }
+
+  if (item.startsAt && new Date(item.startsAt).getTime() > Date.now()) {
+    return "Agendado";
+  }
+
+  if (item.endsAt && new Date(item.endsAt).getTime() < Date.now()) {
+    return "Encerrado";
+  }
+
+  return "Publicado";
+}
+
+function normalizeOptionalHttpUrl(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return "";
+  }
+
+  try {
+    const url = new URL(trimmed);
+    return /^https?:$/i.test(url.protocol) ? url.toString() : "";
+  } catch (error) {
+    return "";
+  }
+}
+
+function isAdminFeatureUnavailableError(error) {
+  const code = String(error?.code || error?.error_code || "").toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+
+  return code === "42P01"
+    || code === "PGRST205"
+    || message.includes("does not exist")
+    || message.includes("could not find the table")
+    || message.includes("admin_announcements")
+    || message.includes("admin_users")
+    || message.includes("user_preferences");
+}
+
+function resolveNotificationPermissionStatus() {
+  if (!supportsClassNotifications()) {
+    return "default";
+  }
+
+  return ["default", "granted", "denied"].includes(Notification.permission)
+    ? Notification.permission
+    : "default";
+}
+
+function resolveInstallationStatus() {
+  if (typeof window === "undefined") {
+    return "browser";
+  }
+
+  if (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) {
+    return "standalone";
+  }
+
+  if (typeof navigator !== "undefined" && navigator.standalone) {
+    return "standalone";
+  }
+
+  return "browser";
+}
+
 function stopUserSubscriptions() {
   return;
 }
@@ -944,6 +1383,10 @@ function renderMainPanel(activeUpload, registration = getRegistrationState()) {
     return renderDocumentViewer();
   }
 
+  if (state.activeTab === ADMIN_TAB_ID) {
+    return state.isAdmin ? renderAdminPanel() : renderAdminAccessDenied();
+  }
+
   if (state.activeTab === REGISTRATION_TAB_ID) {
     return renderRegistrationPanel(registration);
   }
@@ -1028,7 +1471,7 @@ function renderSidebar(registration) {
       </section>
 
       <nav class="sidebar-nav" aria-label="Menu lateral">
-        ${SIDEBAR_ITEMS.map((item) => renderSidebarItem(item, registration)).join("")}
+        ${getSidebarItems().map((item) => renderSidebarItem(item, registration)).join("")}
       </nav>
 
       <div class="sidebar-footer">
@@ -1041,6 +1484,12 @@ function renderSidebar(registration) {
   `;
 }
 
+function getSidebarItems() {
+  return state.isAdmin
+    ? [...SIDEBAR_ITEMS, { id: ADMIN_TAB_ID, label: "Admin", icon: "shield", action: "open-admin" }]
+    : SIDEBAR_ITEMS;
+}
+
 function renderSidebarItem(item, registration) {
   const isViewerStudentCard = state.activeTab === DOCUMENT_VIEWER_TAB_ID
     && state.documentViewer.documentType === DOCUMENT_TYPES.studentCard
@@ -1048,7 +1497,10 @@ function renderSidebarItem(item, registration) {
   const isActive = item.id === state.activeTab
     || (state.activeTab === "academic" && item.tab === state.agendaTab)
     || isViewerStudentCard;
-  const isLocked = !registration.isComplete && item.action !== "open-registration" && item.action !== "open-student-card";
+  const isLocked = !registration.isComplete
+    && item.action !== "open-registration"
+    && item.action !== "open-student-card"
+    && item.action !== "open-admin";
 
   return `
     <button class="sidebar-item ${isActive ? "is-active" : ""} ${isLocked ? "is-locked" : ""}" data-action="${escapeAttribute(item.action)}" ${item.tab ? `data-tab="${escapeAttribute(item.tab)}"` : ""}>
@@ -1170,7 +1622,193 @@ function renderRegistrationPendingState(registration) {
           <button class="secondary" data-action="open-registration">Ir para cadastro</button>
         </div>
       </section>
+      ${renderAnnouncementsFeed()}
     </section>
+  `;
+}
+
+function renderAdminAccessDenied() {
+  return `
+    <section class="section-stack simple-stack">
+      <section class="paper-card dashboard-highlight onboarding-highlight">
+        <div class="section-topline">Admin</div>
+        <h2 class="section-title">Acesso restrito</h2>
+        <p class="section-copy">Esta área administrativa só fica disponível para contas autorizadas no Supabase.</p>
+        <div class="button-row" style="margin-top: 1rem;">
+          <button class="secondary" data-action="set-main-tab" data-tab="home">Voltar ao início</button>
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderAdminPanel() {
+  const draft = state.adminDraft || createEmptyAdminDraft();
+  const announcements = [...state.announcements]
+    .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+
+  return `
+    <section class="section-stack simple-stack">
+      <section class="paper-card dashboard-highlight simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Administração</div>
+            <h2 class="section-title">Avisos, festas e métricas do aplicativo</h2>
+          </div>
+          <div class="button-row">
+            <button class="ghost" data-action="admin-refresh">Atualizar painel</button>
+          </div>
+        </div>
+        <p class="section-copy">Use esta área para publicar avisos do dia, divulgar festas e acompanhar a adoção do app com métricas simples e acionáveis.</p>
+        <div class="metrics-grid" style="margin-top: 1rem;">
+          ${metric("Usuários", String(state.adminStats.totalUsers), "contas com login criado")}
+          ${metric("Ativos 7d", String(state.adminStats.activeUsers7d), "abriram o app na última semana")}
+          ${metric("Cadastros", String(state.adminStats.completedRegistrations), "já concluíram grade + ID")}
+          ${metric("Notificações", String(state.adminStats.notificationSubscribers), "aceitaram os avisos do app")}
+          ${metric("Modo app", String(state.adminStats.standaloneUsers), "abriram em modo instalado")}
+        </div>
+        ${state.adminError ? `<div class="toast is-warning" style="margin-top: 1rem;">${escape(state.adminError)}</div>` : ""}
+      </section>
+
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Publicação</div>
+            <h2 class="section-title">Novo aviso</h2>
+          </div>
+        </div>
+        <p class="section-copy">Os avisos publicados entram na home do app. Use “Avisos do dia” para recados rápidos e “Festas” para chamadas de eventos.</p>
+        <div class="form-grid">
+          <div class="inline-field">
+            <label for="adminDraftCategory">Tipo</label>
+            <select id="adminDraftCategory">
+              <option value="${ANNOUNCEMENT_CATEGORIES.dailyNotice}" ${draft.category === ANNOUNCEMENT_CATEGORIES.dailyNotice ? "selected" : ""}>Aviso do dia</option>
+              <option value="${ANNOUNCEMENT_CATEGORIES.partyAnnouncement}" ${draft.category === ANNOUNCEMENT_CATEGORIES.partyAnnouncement ? "selected" : ""}>Festa</option>
+            </select>
+          </div>
+          <div class="inline-field">
+            <label for="adminDraftTitle">Título</label>
+            <input id="adminDraftTitle" type="text" maxlength="120" value="${escapeAttribute(draft.title)}" placeholder="Ex.: Reunião do DAGV às 18h" />
+          </div>
+          <div class="inline-field">
+            <label for="adminDraftBody">Mensagem</label>
+            <textarea id="adminDraftBody" rows="5" maxlength="1200" placeholder="Escreva o conteúdo que deve aparecer para os alunos.">${escape(draft.body)}</textarea>
+          </div>
+          <div class="simple-meta-grid">
+            <div class="inline-field">
+              <label for="adminDraftStartsAt">Início</label>
+              <input id="adminDraftStartsAt" type="datetime-local" value="${escapeAttribute(draft.startsAt)}" />
+            </div>
+            <div class="inline-field">
+              <label for="adminDraftEndsAt">Fim</label>
+              <input id="adminDraftEndsAt" type="datetime-local" value="${escapeAttribute(draft.endsAt)}" />
+            </div>
+          </div>
+          <div class="simple-meta-grid">
+            <div class="inline-field">
+              <label for="adminDraftActionLabel">Texto do botão</label>
+              <input id="adminDraftActionLabel" type="text" maxlength="40" value="${escapeAttribute(draft.actionLabel)}" placeholder="Ex.: Abrir inscrição" />
+            </div>
+            <div class="inline-field">
+              <label for="adminDraftActionUrl">Link do botão</label>
+              <input id="adminDraftActionUrl" type="url" value="${escapeAttribute(draft.actionUrl)}" placeholder="https://..." />
+            </div>
+          </div>
+          <label class="checkbox-field" for="adminDraftPublished">
+            <input id="adminDraftPublished" type="checkbox" ${draft.isPublished ? "checked" : ""} />
+            <span>Publicar imediatamente</span>
+          </label>
+          <div class="button-row">
+            <button class="secondary" data-action="save-admin-announcement" ${state.adminLoading ? "disabled" : ""}>${state.adminLoading ? "Salvando..." : "Salvar aviso"}</button>
+            <button class="ghost" data-action="admin-refresh">Recarregar</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Publicações</div>
+            <h2 class="section-title">Avisos cadastrados</h2>
+          </div>
+        </div>
+        ${announcements.length
+          ? `<div class="upload-list" style="margin-top: 1rem;">${announcements.map(renderAdminAnnouncementItem).join("")}</div>`
+          : `<div class="empty-state" style="margin-top: 1rem;">Nenhum aviso cadastrado ainda.</div>`}
+      </section>
+    </section>
+  `;
+}
+
+function renderAdminAnnouncementItem(item) {
+  return `
+    <article class="upload-entry admin-announcement-entry ${item.category === ANNOUNCEMENT_CATEGORIES.partyAnnouncement ? "is-party" : ""}">
+      <div class="upload-entry-top">
+        <div>
+          <h3 class="schedule-title">${escape(item.title)}</h3>
+          <div class="support-line">${escape(getAnnouncementCategoryLabel(item.category))} • ${escape(getAnnouncementStatusLabel(item))} • ${escape(formatShortDateTime(item.createdAt))}</div>
+        </div>
+        <span class="tag">${escape(getAnnouncementStatusLabel(item))}</span>
+      </div>
+      ${item.body ? `<p class="section-copy" style="margin-top: 0.75rem;">${escape(item.body)}</p>` : ""}
+      <div class="item-meta">
+        ${item.startsAt ? `<span class="tag">Início ${escape(formatShortDateTime(item.startsAt))}</span>` : ""}
+        ${item.endsAt ? `<span class="tag">Fim ${escape(formatShortDateTime(item.endsAt))}</span>` : ""}
+        ${item.actionUrl ? `<span class="tag">${escape(item.actionLabel || "Link externo")}</span>` : ""}
+      </div>
+      <div class="button-row" style="margin-top: 0.75rem;">
+        <button class="ghost" data-action="toggle-admin-announcement" data-announcement-id="${escapeAttribute(item.id)}">${item.isPublished ? "Despublicar" : "Publicar"}</button>
+        <button class="ghost" data-action="delete-admin-announcement" data-announcement-id="${escapeAttribute(item.id)}">Excluir</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderAnnouncementsFeed() {
+  const dailyNotices = getActiveAnnouncementsByCategory(ANNOUNCEMENT_CATEGORIES.dailyNotice);
+  const partyAnnouncements = getActiveAnnouncementsByCategory(ANNOUNCEMENT_CATEGORIES.partyAnnouncement);
+
+  if (!dailyNotices.length && !partyAnnouncements.length) {
+    return "";
+  }
+
+  return `
+    <section class="section-stack">
+      ${dailyNotices.length ? `
+        <section class="paper-card simple-section">
+          <div class="section-topline">Avisos do dia</div>
+          <h2 class="section-title">Recados ativos para os alunos</h2>
+          <div class="upload-list" style="margin-top: 1rem;">
+            ${dailyNotices.slice(0, 3).map(renderPublishedAnnouncementCard).join("")}
+          </div>
+        </section>
+      ` : ""}
+      ${partyAnnouncements.length ? `
+        <section class="paper-card simple-section">
+          <div class="section-topline">Festas</div>
+          <h2 class="section-title">Próximos anúncios do curso</h2>
+          <div class="upload-list" style="margin-top: 1rem;">
+            ${partyAnnouncements.slice(0, 3).map(renderPublishedAnnouncementCard).join("")}
+          </div>
+        </section>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderPublishedAnnouncementCard(item) {
+  return `
+    <article class="upload-entry admin-announcement-entry ${item.category === ANNOUNCEMENT_CATEGORIES.partyAnnouncement ? "is-party" : ""}">
+      <div class="upload-entry-top">
+        <div>
+          <h3 class="schedule-title">${escape(item.title)}</h3>
+          <div class="support-line">${escape(getAnnouncementCategoryLabel(item.category))}${item.startsAt ? ` • ${escape(formatShortDateTime(item.startsAt))}` : ""}</div>
+        </div>
+        <span class="tag">${escape(getAnnouncementStatusLabel(item))}</span>
+      </div>
+      ${item.body ? `<p class="section-copy" style="margin-top: 0.75rem;">${escape(item.body)}</p>` : ""}
+      ${item.actionUrl ? `<div class="button-row" style="margin-top: 0.75rem;"><a class="ghost link-button" href="${escapeAttribute(item.actionUrl)}" target="_blank" rel="noreferrer">${escape(item.actionLabel || "Abrir link")}</a></div>` : ""}
+    </article>
   `;
 }
 
@@ -1222,6 +1860,8 @@ function renderPortalTab(activeUpload) {
           ${renderHomeShortcut("newspaper", "DAGV", "set-main-tab", "dagv")}
           ${renderHomeShortcut("link", "Links", "set-main-tab", "links")}
         </section>
+
+        ${renderAnnouncementsFeed()}
 
         <section class="paper-card simple-section">
           <div class="section-header-row">
@@ -1631,6 +2271,10 @@ function renderUiIcon(iconName, className = "ui-icon") {
       <path d="M4 12h16"></path>
       <path d="M4 17h16"></path>
     `,
+    shield: `
+      <path d="M12 3 19 6v6c0 4.6-2.7 7.8-7 9-4.3-1.2-7-4.4-7-9V6l7-3Z"></path>
+      <path d="m9.5 12 1.8 1.8 3.6-3.6"></path>
+    `,
     circle: `
       <circle cx="12" cy="12" r="6" class="icon-fill"></circle>
     `,
@@ -1656,6 +2300,10 @@ function getScreenTitle() {
     return "Cadastro";
   }
 
+  if (state.activeTab === ADMIN_TAB_ID) {
+    return "Admin";
+  }
+
   if (state.activeTab === "academic") {
     const agendaTitleMap = {
       today: "Grade Horária",
@@ -1673,6 +2321,7 @@ function getScreenTitle() {
     agenda: "Agenda",
     info: "Informações",
     links: "Links",
+    [ADMIN_TAB_ID]: "Admin",
   };
 
   return mainTitleMap[state.activeTab] || APP_NAME;
@@ -1769,6 +2418,10 @@ function buildRegistrationBannerMessage(registration = getRegistrationState()) {
 }
 
 function ensureAccessAfterRegistration(action) {
+  if (state.isAdmin) {
+    return true;
+  }
+
   const registration = getRegistrationState();
   if (registration.isComplete) {
     return true;
@@ -1814,6 +2467,21 @@ async function onClick(event) {
       sidebarOpen: false,
       documentViewer: createEmptyDocumentViewerState(),
     });
+    return;
+  }
+
+  if (action === "open-admin") {
+    revokeActiveDocumentViewer();
+    setState({
+      activeTab: ADMIN_TAB_ID,
+      sidebarOpen: false,
+      documentViewer: createEmptyDocumentViewerState(),
+      uploadError: "",
+      uploadMessage: "",
+    });
+    if (state.isAdmin) {
+      void refreshAdminDashboard(false);
+    }
     return;
   }
 
@@ -1864,6 +2532,13 @@ async function onClick(event) {
 
   if (action === "refresh-portal-tab") {
     loadPortalTab(button.dataset.tab || state.activeTab, false);
+    return;
+  }
+
+  if (action === "admin-refresh") {
+    if (state.isAdmin) {
+      void refreshAdminDashboard(false);
+    }
     return;
   }
 
@@ -1923,6 +2598,21 @@ async function onClick(event) {
 
   if (action === "open-upload") {
     openUpload(button.dataset.uploadId || "", { inline: true });
+    return;
+  }
+
+  if (action === "save-admin-announcement") {
+    void saveAdminAnnouncement();
+    return;
+  }
+
+  if (action === "toggle-admin-announcement") {
+    void toggleAdminAnnouncementPublished(button.dataset.announcementId || "");
+    return;
+  }
+
+  if (action === "delete-admin-announcement") {
+    void deleteAdminAnnouncement(button.dataset.announcementId || "");
   }
 }
 
@@ -1937,6 +2627,11 @@ function onInput(event) {
       studentCardUrlDraft: event.target.value || "",
       uploadError: "",
     }, { render: false });
+    return;
+  }
+
+  if (String(event.target.id || "").startsWith("adminDraft")) {
+    updateAdminDraftFromEvent(event.target);
   }
 }
 
@@ -1948,6 +2643,11 @@ function onChange(event) {
 
   if (event.target.id === "schedulePdfInput" && event.target.files && event.target.files[0]) {
     uploadDocument(event.target.files[0], event.target, DOCUMENT_TYPES.schedule);
+    return;
+  }
+
+  if (String(event.target.id || "").startsWith("adminDraft")) {
+    updateAdminDraftFromEvent(event.target);
   }
 }
 
@@ -2273,6 +2973,227 @@ async function saveStudentCardLink() {
       uploadError: `Nao consegui salvar o link da carteirinha: ${describeSupabaseError(error)}`,
     });
   }
+}
+
+function updateAdminDraftFromEvent(target) {
+  const draft = state.adminDraft || createEmptyAdminDraft();
+  const nextDraft = { ...draft };
+  const targetId = String(target?.id || "");
+
+  if (targetId === "adminDraftCategory") {
+    nextDraft.category = normalizeAnnouncementCategory(target.value);
+  } else if (targetId === "adminDraftTitle") {
+    nextDraft.title = String(target.value || "");
+  } else if (targetId === "adminDraftBody") {
+    nextDraft.body = String(target.value || "");
+  } else if (targetId === "adminDraftStartsAt") {
+    nextDraft.startsAt = String(target.value || "");
+  } else if (targetId === "adminDraftEndsAt") {
+    nextDraft.endsAt = String(target.value || "");
+  } else if (targetId === "adminDraftActionLabel") {
+    nextDraft.actionLabel = String(target.value || "");
+  } else if (targetId === "adminDraftActionUrl") {
+    nextDraft.actionUrl = String(target.value || "");
+  } else if (targetId === "adminDraftPublished") {
+    nextDraft.isPublished = Boolean(target.checked);
+  }
+
+  setState({
+    adminDraft: nextDraft,
+    adminError: "",
+    uploadError: "",
+  }, { render: false });
+}
+
+async function saveAdminAnnouncement() {
+  if (!state.isAdmin || !state.user || !services.supabase) {
+    return;
+  }
+
+  const payload = buildAdminAnnouncementPayload(state.adminDraft);
+  if (!payload.ok) {
+    setState({
+      adminError: payload.message,
+      uploadError: "",
+      uploadMessage: "",
+    });
+    return;
+  }
+
+  setState({
+    adminLoading: true,
+    adminError: "",
+    uploadError: "",
+    uploadMessage: "Salvando aviso no painel administrativo...",
+  });
+
+  try {
+    const now = new Date().toISOString();
+    const { error } = await services.supabase
+      .from("admin_announcements")
+      .insert({
+        category: payload.value.category,
+        title: payload.value.title,
+        body: payload.value.body,
+        starts_at: payload.value.startsAt,
+        ends_at: payload.value.endsAt,
+        action_label: payload.value.actionLabel,
+        action_url: payload.value.actionUrl,
+        is_published: payload.value.isPublished,
+        created_by: state.user.uid,
+        updated_at: now,
+      });
+
+    if (error) {
+      throw error;
+    }
+
+    setState({
+      adminDraft: createEmptyAdminDraft(),
+      uploadMessage: "Aviso salvo com sucesso.",
+      uploadError: "",
+      adminError: "",
+    });
+
+    await refreshAdminDashboard(true);
+  } catch (error) {
+    setState({
+      adminLoading: false,
+      adminError: `Não consegui salvar o aviso: ${describeSupabaseError(error)}`,
+      uploadMessage: "",
+    });
+  }
+}
+
+async function toggleAdminAnnouncementPublished(announcementId) {
+  if (!state.isAdmin || !services.supabase || !announcementId) {
+    return;
+  }
+
+  const current = state.announcements.find((item) => item.id === announcementId);
+  if (!current) {
+    return;
+  }
+
+  setState({
+    adminLoading: true,
+    adminError: "",
+    uploadMessage: current.isPublished ? "Despublicando aviso..." : "Publicando aviso...",
+    uploadError: "",
+  }, { render: false });
+
+  try {
+    const { error } = await services.supabase
+      .from("admin_announcements")
+      .update({
+        is_published: !current.isPublished,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", announcementId);
+
+    if (error) {
+      throw error;
+    }
+
+    await refreshAdminDashboard(true);
+    setState({
+      uploadMessage: !current.isPublished ? "Aviso publicado com sucesso." : "Aviso movido para rascunho.",
+      uploadError: "",
+      adminError: "",
+    });
+  } catch (error) {
+    setState({
+      adminLoading: false,
+      adminError: `Não consegui atualizar este aviso: ${describeSupabaseError(error)}`,
+      uploadMessage: "",
+    });
+  }
+}
+
+async function deleteAdminAnnouncement(announcementId) {
+  if (!state.isAdmin || !services.supabase || !announcementId) {
+    return;
+  }
+
+  setState({
+    adminLoading: true,
+    adminError: "",
+    uploadMessage: "Removendo aviso do painel...",
+    uploadError: "",
+  }, { render: false });
+
+  try {
+    const { error } = await services.supabase
+      .from("admin_announcements")
+      .delete()
+      .eq("id", announcementId);
+
+    if (error) {
+      throw error;
+    }
+
+    await refreshAdminDashboard(true);
+    setState({
+      uploadMessage: "Aviso removido com sucesso.",
+      uploadError: "",
+      adminError: "",
+    });
+  } catch (error) {
+    setState({
+      adminLoading: false,
+      adminError: `Não consegui excluir este aviso: ${describeSupabaseError(error)}`,
+      uploadMessage: "",
+    });
+  }
+}
+
+function buildAdminAnnouncementPayload(draft) {
+  const title = String(draft?.title || "").trim();
+  const body = String(draft?.body || "").trim();
+  const actionLabel = String(draft?.actionLabel || "").trim();
+  const actionUrl = normalizeOptionalHttpUrl(draft?.actionUrl || "");
+  const startsAt = normalizeAdminDateTimeValue(draft?.startsAt || "");
+  const endsAt = normalizeAdminDateTimeValue(draft?.endsAt || "");
+
+  if (!title) {
+    return { ok: false, message: "Preencha um título para o aviso." };
+  }
+
+  if (!body) {
+    return { ok: false, message: "Escreva a mensagem que os alunos devem ver." };
+  }
+
+  if (String(draft?.actionUrl || "").trim() && !actionUrl) {
+    return { ok: false, message: "Use um link válido começando com http:// ou https://." };
+  }
+
+  if (endsAt && startsAt && new Date(endsAt).getTime() < new Date(startsAt).getTime()) {
+    return { ok: false, message: "O fim do aviso não pode ser anterior ao início." };
+  }
+
+  return {
+    ok: true,
+    value: {
+      category: normalizeAnnouncementCategory(draft?.category),
+      title,
+      body,
+      startsAt,
+      endsAt,
+      actionLabel: actionLabel || "",
+      actionUrl,
+      isPublished: Boolean(draft?.isPublished),
+    },
+  };
+}
+
+function normalizeAdminDateTimeValue(value) {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  const parsed = new Date(trimmed);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 async function parseAcademicPdf(file, fallbackProfile) {
@@ -2690,6 +3611,9 @@ function readPublicSupabaseConfig(rawConfig) {
     url: String(rawConfig?.url || "").trim(),
     anonKey: String(rawConfig?.anonKey || rawConfig?.publishableKey || "").trim(),
     bucket: String(rawConfig?.bucket || SUPABASE_BUCKET || "").trim(),
+    adminEmails: Array.isArray(rawConfig?.adminEmails)
+      ? rawConfig.adminEmails.map((value) => normalizeEmail(value)).filter(Boolean)
+      : [],
   });
 }
 
@@ -2868,8 +3792,10 @@ async function requestClassNotificationPermission() {
       await registerNotificationServiceWorker();
       syncClassNotifications();
     }
+    void syncUserPreferences();
     return permission;
   } catch (error) {
+    void syncUserPreferences();
     return "default";
   }
 }
