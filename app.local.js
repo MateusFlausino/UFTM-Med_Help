@@ -3,7 +3,6 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2?bundle";
 
 const APP_NAME = "Agenda DAGV";
 const APP_MARK = "DAGV";
-const DA_PORTAL_URL = "https://dagvmeduftm.wordpress.com/";
 const SUPABASE_CONFIG_FILE = "supabase-config.js";
 const SUPABASE_BUCKET = "student-pdfs";
 const REGISTRATION_TAB_ID = "registration";
@@ -31,19 +30,6 @@ const LOCAL_DB_NAME = "uftm-mobile-local-db";
 const LOCAL_DB_VERSION = 1;
 const UPLOAD_STORE = "uploads";
 
-const MAIN_NAV_ITEMS = [
-  { id: "home", label: "Página inicial" },
-  { id: "elections", label: "Eleições DAGV" },
-  { id: "dagv", label: "DAGV" },
-  { id: "coordination", label: "Coordenação" },
-  { id: "agenda", label: "Agenda Medicina" },
-  { id: "info", label: "Informações" },
-  { id: "links", label: "Links" },
-  { id: "academic", label: "Acadêmico" },
-];
-
-const PORTAL_TABS = new Set(["home", "elections", "dagv", "coordination", "agenda", "info", "links"]);
-
 const AGENDA_NAV_ITEMS = [
   { id: "today", label: "Hoje" },
   { id: "week", label: "Semana" },
@@ -55,50 +41,8 @@ const SIDEBAR_ITEMS = [
   { id: REGISTRATION_TAB_ID, label: "Cadastro", icon: "user-plus", action: "open-registration" },
   { id: "student-card", label: "ID Digital", icon: "id-card", action: "open-student-card" },
   { id: "today", label: "Grade Horaria", icon: "calendar-day", action: "open-academic-tab", tab: "today" },
+  { id: "week", label: "Semana", icon: "calendar-grid", action: "open-academic-tab", tab: "week" },
   { id: "menu", label: "Restaurantes", icon: "utensils", action: "open-academic-tab", tab: "menu" },
-  { id: "dagv", label: "DAGV", icon: "newspaper", action: "set-main-tab", tab: "dagv" },
-  { id: "links", label: "Links", icon: "link", action: "set-main-tab", tab: "links" },
-];
-
-const DAGV_LINKS = [
-  { title: "Portal do DAGV", caption: "Página principal do diretório", href: "https://dagvmeduftm.wordpress.com/" },
-  { title: "Eleições DAGV", caption: "Acompanhe editais e chamadas", href: "https://dagvmeduftm.wordpress.com/eleicoes-dagv/" },
-  { title: "Estatuto", caption: "Base institucional do diretório", href: "https://dagvmeduftm.wordpress.com/dagv/estatuto-dagv/" },
-  { title: "Localização", caption: "Onde encontrar o DAGV", href: "https://dagvmeduftm.wordpress.com/dagv/localizacao/" },
-  { title: "Galeria de fotos", caption: "Registro visual do diretório", href: "https://dagvmeduftm.wordpress.com/dagv/galeria-de-fotos/" },
-];
-
-const COORDINATION_LINKS = [
-  { title: "Coordenação Geral", caption: "Gestão principal do DAGV", href: "https://dagvmeduftm.wordpress.com/coordenacao/coordenacao-geral/" },
-  { title: "Secretaria Geral", caption: "Documentos e organização", href: "https://dagvmeduftm.wordpress.com/coordenacao/secretaria-geral/" },
-  { title: "Finanças e Patrimônio", caption: "Recursos e estrutura", href: "https://dagvmeduftm.wordpress.com/coordenacao/coordenacao-de-financas-e-patrimonio/" },
-  { title: "Comunicação", caption: "Divulgação e identidade", href: "https://dagvmeduftm.wordpress.com/coordenacao/coordenacao-de-comunicacao/" },
-  { title: "Ensino, Pesquisa e Extensão", caption: "Projetos acadêmicos", href: "https://dagvmeduftm.wordpress.com/coordenacao/coordenacao-de-ensino-pesquisa-e-extensao/" },
-  { title: "Sociocultural", caption: "Ações e eventos", href: "https://dagvmeduftm.wordpress.com/coordenacao/coordenacao-sociocultural/" },
-  { title: "Representação Estudantil", caption: "Relação institucional", href: "https://dagvmeduftm.wordpress.com/coordenacao/coordenacao-de-representacao-estudantil/" },
-  { title: "Desenvolvimento Tecnológico", caption: "Ferramentas do diretório", href: "https://dagvmeduftm.wordpress.com/coordenacao/coordenacao-de-desenvolvimento-tecnologico/" },
-];
-
-const INFO_LINKS = [
-  { title: "Eventos Acadêmicos", caption: "Calendário e oportunidades", href: "https://dagvmeduftm.wordpress.com/agenda-medicina/eventos-academicos/" },
-  { title: "Festas", caption: "Agenda social do curso", href: "https://dagvmeduftm.wordpress.com/festas/" },
-  { title: "DENEM", caption: "Movimento estudantil nacional", href: "https://dagvmeduftm.wordpress.com/informacoes-2/denem/" },
-  { title: "DCE UFTM", caption: "Diretório central dos estudantes", href: "https://dagvmeduftm.wordpress.com/informacoes-2/dce-uftm/" },
-  { title: "Exigências Horárias", caption: "Carga e horas complementares", href: "https://dagvmeduftm.wordpress.com/informacoes-2/exigencias-horarias/" },
-  { title: "CVU Uberaba", caption: "Referências da cidade", href: "https://dagvmeduftm.wordpress.com/informacoes-2/cvu-uberaba/" },
-  { title: "CEPOP UFTM", caption: "Espaços e serviços", href: "https://dagvmeduftm.wordpress.com/informacoes-2/cepop-uftm/" },
-  { title: "PET Medicina", caption: "Programa PET", href: "https://dagvmeduftm.wordpress.com/informacoes-2/pet-medicina/" },
-  { title: "Cursinho Carolina", caption: "Projeto educacional", href: "https://dagvmeduftm.wordpress.com/informacoes-2/cursinho-carolina/" },
-  { title: "Ligas Acadêmicas", caption: "Organizações estudantis", href: "https://dagvmeduftm.wordpress.com/informacoes-2/ligas-academicas/" },
-  { title: "Instagram", caption: "Canal social do DA", href: "https://dagvmeduftm.wordpress.com/informacoes-2/instagram/" },
-];
-
-const LINKS_TAB_ITEMS = [
-  { title: "Portal do DAGV", caption: "Navegação completa do WordPress", href: "https://dagvmeduftm.wordpress.com/" },
-  { title: "Loja Online DAGV", caption: "Produtos e arrecadação", href: "https://dagvmeduftm.wordpress.com/links/loja-online-dagv/" },
-  { title: "Divulgação de Alunos", caption: "Espaço para comunicados", href: "https://dagvmeduftm.wordpress.com/links/divulgacao-alunos/" },
-  { title: "Festas", caption: "Eventos sociais do curso", href: "https://dagvmeduftm.wordpress.com/festas/" },
-  { title: "Instagram", caption: "Canal social do DA", href: "https://dagvmeduftm.wordpress.com/informacoes-2/instagram/" },
 ];
 
 const defaultMenu = [
@@ -157,10 +101,6 @@ let state = {
   openingUploadId: "",
   studentCardUrlDraft: "",
   documentViewer: createEmptyDocumentViewerState(),
-  portalContent: {},
-  newsFeed: [],
-  portalLoadingTab: "",
-  portalError: "",
   isAdmin: false,
   adminRole: "",
   announcements: [],
@@ -184,7 +124,6 @@ init().catch((error) => {
 async function init() {
   render();
   void registerNotificationServiceWorker();
-  loadPortalTab("home", true);
   refreshRuMenuIfNeeded(true);
 
   if (!supabaseReady) {
@@ -1350,7 +1289,6 @@ function renderLogin() {
         </div>
         <div class="login-actions login-actions-hero">
           <button class="cta" data-action="login-google" ${canLogin ? "" : "disabled"}>${escape(loginLabel)}</button>
-          <a class="ghost link-button" href="${escapeAttribute(DA_PORTAL_URL)}" target="_blank" rel="noreferrer">Portal do DA</a>
         </div>
         <p class="login-support ${state.authError ? "is-warning" : ""}">${escape(supportMessage)}</p>
       </div>
@@ -1367,10 +1305,9 @@ function renderStartupFailure(error) {
           <img class="login-brand-mark-image" src="./icon.png" alt="DAGV" />
         </div>
         <h1>Não conseguimos abrir o app agora.</h1>
-        <p class="login-subtitle">Tente novamente em instantes ou siga pelo portal oficial do DAGV.</p>
+        <p class="login-subtitle">Tente novamente em instantes para voltar ao painel interno do aplicativo.</p>
         <div class="login-actions login-actions-hero">
           <button class="cta" data-action="reload-app">Tentar novamente</button>
-          <a class="ghost link-button" href="${escapeAttribute(DA_PORTAL_URL)}" target="_blank" rel="noreferrer">Portal do DA</a>
         </div>
         <p class="login-support is-warning">${escape(describeLocalError(error))}</p>
       </div>
@@ -1399,7 +1336,7 @@ function renderMainPanel(activeUpload, registration = getRegistrationState()) {
     return renderAcademicPanel(activeUpload);
   }
 
-  return renderPortalTab(activeUpload);
+  return renderHomePanel(activeUpload);
 }
 
 function renderStudentCardScreen() {
@@ -1812,124 +1749,71 @@ function renderPublishedAnnouncementCard(item) {
   `;
 }
 
-function renderPortalTab(activeUpload) {
+function renderHomePanel(activeUpload) {
   const academicData = getAcademicData(activeUpload);
   const schedule = academicData?.schedule || [];
   const todayClasses = getClassesForDate(schedule, state.referenceDate);
   const nextClass = findNextClass(schedule, state.referenceDate);
   const menu = state.menu[0] || null;
-  const tabContent = state.portalContent[state.activeTab];
-  const pages = tabContent?.pages || [];
-  const titleMap = {
-    home: "Página inicial",
-    elections: "Eleições DAGV",
-    dagv: "DAGV",
-    coordination: "Coordenação",
-    agenda: "Agenda Medicina",
-    info: "Informações",
-    links: "Links",
-  };
-  const descriptionMap = {
-    home: "Atalhos rápidos para RU, grade e conteúdos do diretório.",
-    elections: "Editais e chamadas do diretório.",
-    dagv: "Conteúdo institucional do DAGV.",
-    coordination: "Frentes e coordenações do diretório.",
-    agenda: "Eventos e agenda do curso.",
-    info: "Informações úteis da comunidade acadêmica.",
-    links: "Acessos rápidos do DAGV.",
-  };
-
-  if (state.activeTab === "home") {
-    return `
-      <section class="section-stack simple-stack">
-        <section class="paper-card dashboard-highlight">
-          <div class="section-topline">Resumo</div>
-          <h2 class="section-title">${escape(buildHeroTitle(activeUpload, academicData, todayClasses, nextClass))}</h2>
-          <p class="section-copy">${escape(buildHeroSubtitle(academicData))}</p>
-          <div class="button-row" style="margin-top: 1rem;">
-            <button class="secondary" data-action="${academicData ? "open-academic-tab" : "open-registration"}" ${academicData ? 'data-tab="today"' : ""}>${academicData ? "Abrir agenda" : "Finalizar cadastro"}</button>
-            <button class="ghost" data-action="set-main-tab" data-tab="dagv">Portal do DAGV</button>
-          </div>
-        </section>
-
-        <section class="home-shortcuts">
-          ${renderHomeShortcut("calendar-day", "Hoje", "open-academic-tab", "today")}
-          ${renderHomeShortcut("utensils", "RU", "open-academic-tab", "menu")}
-          ${renderHomeShortcut("calendar-grid", "Semana", "open-academic-tab", "week")}
-          ${renderHomeShortcut("user-plus", "Cadastro", "open-registration", "")}
-          ${renderHomeShortcut("newspaper", "DAGV", "set-main-tab", "dagv")}
-          ${renderHomeShortcut("link", "Links", "set-main-tab", "links")}
-        </section>
-
-        ${renderAnnouncementsFeed()}
-
-        <section class="paper-card simple-section">
-          <div class="section-header-row">
-            <div>
-              <div class="section-topline">Restaurante</div>
-              <h2 class="section-title">Hoje no RU Abadia</h2>
-            </div>
-            <button class="ghost" data-action="open-academic-tab" data-tab="menu">Ver tudo</button>
-          </div>
-          ${menu ? `
-            <div class="simple-list">
-              ${renderSimpleInfoRow("Prato principal", menu.mainDish || "Sem informação")}
-              ${renderSimpleInfoRow("Opção", menu.option || "Sem informação")}
-              ${renderSimpleInfoRow("Sobremesa", menu.dessert || "Sem informação")}
-            </div>
-          ` : `<div class="empty-state">Sem cardápio disponível agora.</div>`}
-        </section>
-
-        <section class="paper-card simple-section">
-          <div class="section-header-row">
-            <div>
-              <div class="section-topline">Grade horária</div>
-              <h2 class="section-title">Hoje</h2>
-            </div>
-            <div class="inline-field compact-date-field">
-              <label for="referenceDate">Data</label>
-              <input id="referenceDate" type="date" value="${escape(state.referenceDate)}" />
-            </div>
-          </div>
-          <div class="timeline-list">
-            ${activeUpload
-              ? (todayClasses.length
-                  ? todayClasses.map(renderSchedule).join("")
-                  : `<div class="empty-state">Nenhuma aula nesta data.</div>`)
-              : renderMissingPdfState("Importe o PDF do SCA para montar sua grade.")}
-          </div>
-        </section>
-
-        ${state.newsFeed.length ? `
-          <section class="section-stack">
-            <div class="section-topline">Últimas do DAGV</div>
-            <div class="link-grid compact-grid">
-              ${state.newsFeed.slice(0, 2).map(renderNewsCard).join("")}
-            </div>
-          </section>
-        ` : ""}
-      </section>
-    `;
-  }
-
   return `
     <section class="section-stack simple-stack">
-      <section class="paper-card agenda-shell simple-section">
-        <div class="section-header-row">
-          <div>
-            <div class="section-topline">${escape(titleMap[state.activeTab] || "Portal DAGV")}</div>
-            <h2 class="section-title">${escape(titleMap[state.activeTab] || "Portal DAGV")}</h2>
-          </div>
+      <section class="paper-card dashboard-highlight">
+        <div class="section-topline">Resumo</div>
+        <h2 class="section-title">${escape(buildHeroTitle(activeUpload, academicData, todayClasses, nextClass))}</h2>
+        <p class="section-copy">${escape(buildHeroSubtitle(academicData))}</p>
+        <div class="button-row" style="margin-top: 1rem;">
+          <button class="secondary" data-action="${academicData ? "open-academic-tab" : "open-registration"}" ${academicData ? 'data-tab="today"' : ""}>${academicData ? "Abrir agenda" : "Finalizar cadastro"}</button>
+          ${getRegistrationState().studentCardUpload ? `<button class="ghost" data-action="open-student-card">Abrir ID digital</button>` : ""}
         </div>
-        <p class="section-copy">${escape(descriptionMap[state.activeTab] || "Conteúdo do DAGV carregado dentro do aplicativo.")}</p>
-        ${state.portalError && state.portalLoadingTab !== state.activeTab ? `<div class="toast is-warning" style="margin-top: 1rem;">${escape(state.portalError)}</div>` : ""}
       </section>
 
-      ${state.portalLoadingTab === state.activeTab && !pages.length
-        ? `<div class="empty-state">Carregando o conteúdo atualizado do DAGV...</div>`
-        : pages.length
-          ? `<section class="section-stack">${pages.map(renderPortalPage).join("")}</section>`
-          : `<div class="empty-state">Ainda não consegui carregar o conteúdo desta aba agora.</div>`}
+      <section class="home-shortcuts">
+        ${renderHomeShortcut("calendar-day", "Hoje", "open-academic-tab", "today")}
+        ${renderHomeShortcut("utensils", "RU", "open-academic-tab", "menu")}
+        ${renderHomeShortcut("calendar-grid", "Semana", "open-academic-tab", "week")}
+        ${renderHomeShortcut("user-plus", "Cadastro", "open-registration", "")}
+        ${getRegistrationState().studentCardUpload ? renderHomeShortcut("id-card", "ID Digital", "open-student-card", "") : ""}
+        ${state.isAdmin ? renderHomeShortcut("shield", "Admin", "open-admin", "") : ""}
+      </section>
+
+      ${renderAnnouncementsFeed()}
+
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Restaurante</div>
+            <h2 class="section-title">Hoje no RU Abadia</h2>
+          </div>
+          <button class="ghost" data-action="open-academic-tab" data-tab="menu">Ver tudo</button>
+        </div>
+        ${menu ? `
+          <div class="simple-list">
+            ${renderSimpleInfoRow("Prato principal", menu.mainDish || "Sem informação")}
+            ${renderSimpleInfoRow("Opção", menu.option || "Sem informação")}
+            ${renderSimpleInfoRow("Sobremesa", menu.dessert || "Sem informação")}
+          </div>
+        ` : `<div class="empty-state">Sem cardápio disponível agora.</div>`}
+      </section>
+
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Grade horária</div>
+            <h2 class="section-title">Hoje</h2>
+          </div>
+          <div class="inline-field compact-date-field">
+            <label for="referenceDate">Data</label>
+            <input id="referenceDate" type="date" value="${escape(state.referenceDate)}" />
+          </div>
+        </div>
+        <div class="timeline-list">
+          ${activeUpload
+            ? (todayClasses.length
+                ? todayClasses.map(renderSchedule).join("")
+                : `<div class="empty-state">Nenhuma aula nesta data.</div>`)
+            : renderMissingPdfState("Importe o PDF do SCA para montar sua grade.")}
+        </div>
+      </section>
     </section>
   `;
 }
@@ -2106,92 +1990,10 @@ function renderMenuCard(item) {
   `;
 }
 
-function renderMainTabButton(item) {
-  return `
-    <button class="tab-button compact-tab ${state.activeTab === item.id ? "is-active" : ""}" data-action="set-main-tab" data-tab="${item.id}">
-      ${item.label}
-    </button>
-  `;
-}
-
 function renderAgendaTabButton(item) {
   return `
     <button class="segmented-button compact-segment ${state.agendaTab === item.id ? "is-active" : ""}" data-action="set-agenda-tab" data-tab="${item.id}">
       ${item.label}
-    </button>
-  `;
-}
-
-function renderPortalPage(page) {
-  return `
-    <article class="paper-card portal-page">
-      <div class="portal-page-head">
-        <div>
-          <div class="section-topline">${escape(page.sourceLabel || "DAGV")}</div>
-          <h3 class="section-title">${escape(page.title || "Página")}</h3>
-        </div>
-        ${page.publishedAt ? `<span class="tag">${escape(formatShortDateTime(page.publishedAt))}</span>` : ""}
-      </div>
-      ${page.image ? `<img class="portal-image" src="${escapeAttribute(page.image)}" alt="${escapeAttribute(page.title || "Imagem da página")}" />` : ""}
-      ${page.summary ? `<p class="section-copy">${escape(page.summary)}</p>` : ""}
-      <div class="portal-blocks">
-        ${(page.blocks || []).map(renderPortalBlock).join("")}
-      </div>
-    </article>
-  `;
-}
-
-function renderPortalBlock(block) {
-  if (block.type === "heading") {
-    return `<h4 class="portal-heading">${escape(block.text)}</h4>`;
-  }
-
-  if (block.type === "list") {
-    return `<div class="portal-list-item">${escape(block.text)}</div>`;
-  }
-
-  return `<p class="portal-paragraph">${escape(block.text)}</p>`;
-}
-
-function renderNewsCard(item) {
-  return `
-    <article class="paper-card news-card simple-section">
-      ${item.image ? `<img class="portal-image" src="${escapeAttribute(item.image)}" alt="${escapeAttribute(item.title || "Imagem da notícia")}" />` : ""}
-      <div class="section-topline">${escape(item.sourceLabel || "Atualização")}</div>
-      <h3 class="schedule-title">${escape(item.title || "Notícia")}</h3>
-      <p class="section-copy">${escape(item.summary || "Sem resumo disponível.")}</p>
-      <div class="support-line">${escape(item.publishedAt ? formatShortDateTime(item.publishedAt) : "sem data")}</div>
-    </article>
-  `;
-}
-
-function renderLinkCard(item) {
-  return `
-    <a class="paper-card link-card" href="${escapeAttribute(item.href)}" target="_blank" rel="noreferrer">
-      <div class="link-card-top">
-        <span class="tag">Portal</span>
-      </div>
-      <h3 class="schedule-title">${escape(item.title)}</h3>
-      <p class="section-copy">${escape(item.caption)}</p>
-      <span class="link-hint">Abrir no WordPress</span>
-    </a>
-  `;
-}
-
-function renderInlineLink(item) {
-  return `
-    <a class="inline-link" href="${escapeAttribute(item.href)}" target="_blank" rel="noreferrer">
-      <strong>${escape(item.title)}</strong>
-      <span>${escape(item.caption)}</span>
-    </a>
-  `;
-}
-
-function renderShortcutCard(title, caption, action, tab) {
-  return `
-    <button class="paper-card shortcut-card" data-action="${escapeAttribute(action)}" data-tab="${escapeAttribute(tab)}">
-      <strong>${escape(title)}</strong>
-      <span>${escape(caption)}</span>
     </button>
   `;
 }
@@ -2315,12 +2117,6 @@ function getScreenTitle() {
 
   const mainTitleMap = {
     home: "Início",
-    elections: "Eleições",
-    dagv: "DAGV",
-    coordination: "Coordenação",
-    agenda: "Agenda",
-    info: "Informações",
-    links: "Links",
     [ADMIN_TAB_ID]: "Admin",
   };
 
@@ -2496,9 +2292,6 @@ async function onClick(event) {
       sidebarOpen: false,
       documentViewer: createEmptyDocumentViewerState(),
     });
-    if (PORTAL_TABS.has(nextTab)) {
-      loadPortalTab(nextTab, true);
-    }
     return;
   }
 
@@ -2527,11 +2320,6 @@ async function onClick(event) {
       sidebarOpen: false,
       documentViewer: createEmptyDocumentViewerState(),
     });
-    return;
-  }
-
-  if (action === "refresh-portal-tab") {
-    loadPortalTab(button.dataset.tab || state.activeTab, false);
     return;
   }
 
@@ -3232,44 +3020,6 @@ async function parseAcademicPdfWithApi(file, fallbackProfile) {
   }
 
   return result.academicData;
-}
-
-async function loadPortalTab(tab, silent = false) {
-  if (!PORTAL_TABS.has(tab)) {
-    return;
-  }
-
-  setState({
-    portalLoadingTab: tab,
-    portalError: "",
-  }, { render: !silent });
-
-  try {
-    const response = await fetch(`/api/dagv-content?tab=${encodeURIComponent(tab)}`);
-    const result = await response.json().catch(() => null);
-
-    if (!response.ok || !result?.success) {
-      throw new Error(result?.message || `falha ao carregar o conteúdo do DAGV (${response.status})`);
-    }
-
-    setState({
-      portalLoadingTab: "",
-      portalError: "",
-      portalContent: {
-        ...state.portalContent,
-        [tab]: {
-          pages: Array.isArray(result.pages) ? result.pages : [],
-          generatedAt: result.generatedAt || "",
-        },
-      },
-      newsFeed: Array.isArray(result.news) ? result.news : state.newsFeed,
-    });
-  } catch (error) {
-    setState({
-      portalLoadingTab: "",
-      portalError: `Não consegui atualizar esta aba agora: ${describeLocalError(error)}`,
-    }, { render: !silent });
-  }
 }
 
 async function setActiveUpload(uploadId) {
