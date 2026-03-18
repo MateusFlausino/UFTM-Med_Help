@@ -682,26 +682,26 @@ function detectStudentCardBounds(image) {
 
   context.drawImage(image, 0, 0, sampleWidth, sampleHeight);
   const { data } = context.getImageData(0, 0, sampleWidth, sampleHeight);
-  const rowThreshold = Math.max(12, Math.round(sampleWidth * 0.025));
-  const columnThreshold = Math.max(12, Math.round(sampleHeight * 0.025));
+  const rowThreshold = 24;
+  const columnThreshold = 24;
 
   let top = 0;
-  while (top < sampleHeight && countVisiblePixelsInRow(data, sampleWidth, top) < rowThreshold) {
+  while (top < sampleHeight && getRowEdgeSignal(data, sampleWidth, top) < rowThreshold) {
     top += 1;
   }
 
   let bottom = sampleHeight - 1;
-  while (bottom >= top && countVisiblePixelsInRow(data, sampleWidth, bottom) < rowThreshold) {
+  while (bottom >= top && getRowEdgeSignal(data, sampleWidth, bottom) < rowThreshold) {
     bottom -= 1;
   }
 
   let left = 0;
-  while (left < sampleWidth && countVisiblePixelsInColumn(data, sampleWidth, sampleHeight, left) < columnThreshold) {
+  while (left < sampleWidth && getColumnEdgeSignal(data, sampleWidth, sampleHeight, left) < columnThreshold) {
     left += 1;
   }
 
   let right = sampleWidth - 1;
-  while (right >= left && countVisiblePixelsInColumn(data, sampleWidth, sampleHeight, right) < columnThreshold) {
+  while (right >= left && getColumnEdgeSignal(data, sampleWidth, sampleHeight, right) < columnThreshold) {
     right -= 1;
   }
 
@@ -709,7 +709,7 @@ function detectStudentCardBounds(image) {
     return null;
   }
 
-  const samplePadding = Math.max(2, Math.round(Math.min(sampleWidth, sampleHeight) * 0.006));
+  const samplePadding = Math.max(4, Math.round(Math.min(sampleWidth, sampleHeight) * 0.012));
   const paddedLeft = Math.max(0, left - samplePadding);
   const paddedTop = Math.max(0, top - samplePadding);
   const paddedRight = Math.min(sampleWidth - 1, right + samplePadding);
@@ -727,36 +727,32 @@ function detectStudentCardBounds(image) {
   return { x, y, width, height };
 }
 
-function countVisiblePixelsInRow(data, width, row) {
-  let count = 0;
+function getRowEdgeSignal(data, width, row) {
+  let total = 0;
   const offset = row * width * 4;
 
   for (let column = 0; column < width; column += 1) {
-    if (isVisibleStudentCardPixel(data, offset + (column * 4))) {
-      count += 1;
-    }
+    total += getStudentCardPixelSignal(data, offset + (column * 4));
   }
 
-  return count;
+  return total / width;
 }
 
-function countVisiblePixelsInColumn(data, width, height, column) {
-  let count = 0;
+function getColumnEdgeSignal(data, width, height, column) {
+  let total = 0;
 
   for (let row = 0; row < height; row += 1) {
     const offset = ((row * width) + column) * 4;
-    if (isVisibleStudentCardPixel(data, offset)) {
-      count += 1;
-    }
+    total += getStudentCardPixelSignal(data, offset);
   }
 
-  return count;
+  return total / height;
 }
 
-function isVisibleStudentCardPixel(data, offset) {
+function getStudentCardPixelSignal(data, offset) {
   const alpha = data[offset + 3];
   if (alpha < 10) {
-    return false;
+    return 0;
   }
 
   const red = data[offset];
@@ -765,8 +761,13 @@ function isVisibleStudentCardPixel(data, offset) {
   const brightest = Math.max(red, green, blue);
   const darkest = Math.min(red, green, blue);
   const luminance = (0.2126 * red) + (0.7152 * green) + (0.0722 * blue);
+  const contrast = brightest - darkest;
 
-  return brightest > 26 || (luminance > 20 && (brightest - darkest) > 8);
+  if (brightest < 26 && luminance < 20) {
+    return 0;
+  }
+
+  return Math.max(0, luminance - 14) + (Math.max(0, contrast - 6) * 0.9);
 }
 
 function hasCompletedRegistration(uploads, profile) {
