@@ -1602,6 +1602,31 @@ body {
   .news-card {
     padding: 1rem;
   }
+
+  .document-viewer-shell.is-student-card-viewer {
+    position: fixed;
+    inset: 0;
+    z-index: 32;
+    width: 100vw;
+    min-height: 100dvh;
+    padding:
+      max(0.85rem, env(safe-area-inset-top))
+      max(0.75rem, env(safe-area-inset-right))
+      max(0.75rem, env(safe-area-inset-bottom))
+      max(0.75rem, env(safe-area-inset-left));
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .document-viewer-shell.is-student-card-viewer .section-header-row {
+    margin-bottom: 0;
+  }
+
+  .document-viewer-shell.is-student-card-viewer .document-viewer-frame {
+    min-height: calc(100dvh - 7rem);
+    border-radius: 1rem;
+    border-color: rgba(255, 255, 255, 0.08);
+  }
 }
 
 .app-frame {
@@ -1791,12 +1816,33 @@ body {
   gap: 1rem;
 }
 
+.document-viewer-shell.is-student-card-viewer {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: #12151b;
+}
+
+.document-viewer-shell.is-student-card-viewer .section-topline,
+.document-viewer-shell.is-student-card-viewer .section-title {
+  color: #fff;
+}
+
+.document-viewer-shell.is-student-card-viewer .ghost {
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.14);
+}
+
 .document-viewer-frame {
   width: 100%;
   min-height: 72vh;
   border: 1px solid rgba(122, 31, 36, 0.08);
   border-radius: 1.2rem;
   background: #f5f5f5;
+}
+
+.document-viewer-frame.is-student-card-frame {
+  background: #000;
 }
 
 .login-hero-shell {
@@ -1989,6 +2035,20 @@ body {
 
   .document-viewer-frame {
     min-height: 66vh;
+  }
+}
+
+@media (max-width: 760px) and (orientation: landscape) {
+  .document-viewer-shell.is-student-card-viewer {
+    padding:
+      max(0.5rem, env(safe-area-inset-top))
+      max(0.65rem, env(safe-area-inset-right))
+      max(0.5rem, env(safe-area-inset-bottom))
+      max(0.65rem, env(safe-area-inset-left));
+  }
+
+  .document-viewer-shell.is-student-card-viewer .document-viewer-frame {
+    min-height: calc(100dvh - 4.75rem);
   }
 }
 

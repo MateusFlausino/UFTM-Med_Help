@@ -692,6 +692,7 @@ function renderMainPanel(activeUpload, registration = getRegistrationState()) {
 
 function renderDocumentViewer() {
   const viewer = state.documentViewer || createEmptyDocumentViewerState();
+  const isStudentCardViewer = viewer.documentType === DOCUMENT_TYPES.studentCard;
   const title = viewer.documentType === DOCUMENT_TYPES.studentCard
     ? "Carteirinha estudantil"
     : viewer.title || "Documento";
@@ -700,7 +701,7 @@ function renderDocumentViewer() {
 
   return `
     <section class="section-stack simple-stack">
-      <section class="paper-card simple-section document-viewer-shell">
+      <section class="paper-card simple-section document-viewer-shell ${isStudentCardViewer ? "is-student-card-viewer" : ""}">
         <div class="section-header-row">
           <div>
             <div class="section-topline">${escape(topline)}</div>
@@ -713,7 +714,7 @@ function renderDocumentViewer() {
         ${viewer.loading
           ? `<div class="empty-state" style="margin-top: 1rem;">${viewer.documentType === DOCUMENT_TYPES.studentCard ? "Carregando o ID digital dentro do app..." : "Carregando o documento dentro do app..."}</div>`
           : frameSrc
-            ? `<iframe class="document-viewer-frame" src="${escapeAttribute(frameSrc)}" title="${escapeAttribute(title)}" referrerpolicy="no-referrer"></iframe>`
+            ? `<iframe class="document-viewer-frame ${isStudentCardViewer ? "is-student-card-frame" : ""}" src="${escapeAttribute(frameSrc)}" title="${escapeAttribute(title)}" referrerpolicy="no-referrer"></iframe>`
             : `<div class="empty-state" style="margin-top: 1rem;">Nao consegui preparar este documento agora.</div>`}
       </section>
     </section>
@@ -2106,6 +2107,9 @@ async function openUpload(uploadId, options = {}) {
     : state.agendaTab;
 
   revokeActiveDocumentViewer();
+  if (inline && record.documentType === DOCUMENT_TYPES.studentCard) {
+    void enterStudentCardImmersiveMode();
+  }
   setState({
     openingUploadId: uploadId,
     uploadError: "",
@@ -2442,6 +2446,7 @@ function clearSensitiveUrlData() {
 }
 
 function revokeActiveDocumentViewer() {
+  void exitStudentCardImmersiveMode();
   try {
     if (state.documentViewer?.objectUrl) {
       URL.revokeObjectURL(state.documentViewer.objectUrl);
@@ -2463,6 +2468,51 @@ function closeDocumentViewer() {
     uploadError: "",
     uploadMessage: "",
   });
+}
+
+function isCompactViewport() {
+  return typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches;
+}
+
+async function enterStudentCardImmersiveMode() {
+  if (typeof document === "undefined" || !isCompactViewport()) {
+    return;
+  }
+
+  const target = document.documentElement;
+  try {
+    if (!document.fullscreenElement && typeof target.requestFullscreen === "function") {
+      await target.requestFullscreen({ navigationUI: "hide" });
+    }
+  } catch (error) {
+    // Alguns navegadores móveis recusam fullscreen; mantemos o fallback visual via CSS.
+  }
+
+  try {
+    if (screen.orientation && typeof screen.orientation.lock === "function") {
+      await screen.orientation.lock("landscape");
+    }
+  } catch (error) {
+    // Se o navegador não aceitar lock de orientação, seguimos sem bloquear o fluxo.
+  }
+}
+
+async function exitStudentCardImmersiveMode() {
+  try {
+    if (screen.orientation && typeof screen.orientation.unlock === "function") {
+      screen.orientation.unlock();
+    }
+  } catch (error) {
+    // Alguns navegadores não implementam unlock.
+  }
+
+  try {
+    if (typeof document !== "undefined" && document.fullscreenElement && typeof document.exitFullscreen === "function") {
+      await document.exitFullscreen();
+    }
+  } catch (error) {
+    // Ignoramos falhas ao sair do fullscreen.
+  }
 }
 
 function supportsClassNotifications() {
