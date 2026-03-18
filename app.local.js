@@ -440,28 +440,26 @@ function render() {
   }
 
   const activeUpload = getActiveUpload();
-  const academicData = getAcademicData(activeUpload);
-  const todayClasses = getClassesForDate(academicData?.schedule || [], state.referenceDate);
-  const nextClass = findNextClass(academicData?.schedule || [], state.referenceDate);
-  const totalUploads = state.uploads.length;
-  const disciplineCount = academicData?.disciplines?.length || 0;
-  const classCount = academicData?.schedule?.length || 0;
+  const statusBanner = renderStatusBanner();
 
   appElement.innerHTML = `
-    <div class="app-view ios-shell">
-      <header class="header-bar">
-        <div class="header-brand">
-          <span class="brand-mark">${APP_MARK}</span>
+    <div class="app-view ios-shell campus-shell">
+      <header class="header-bar compact-header">
+        <button class="brand-mark brand-mark-button" data-action="set-main-tab" data-tab="home">${APP_MARK}</button>
+        <div class="header-brand header-brand-centered">
           <div class="header-copy">
-            <h1>${APP_NAME}</h1>
-            <p>${APP_TAGLINE}</p>
+            <span class="header-kicker">Painel do DAGV</span>
+            <h1>${escape(getScreenTitle())}</h1>
           </div>
         </div>
-        <div class="status-inline">
-          <span class="status-dot" aria-hidden="true"></span>
-          <span>${escape(getStatusMessage())}</span>
-        </div>
         <div class="button-row">
+          <button class="ghost header-action" data-action="sync-ru">RU</button>
+          <button class="ghost header-action" data-action="logout">Sair</button>
+        </div>
+      </header>
+
+      <section class="toolbar-strip">
+        <div class="user-line">
           <div class="user-chip">
             ${renderAvatar(state.user)}
             <div>
@@ -469,44 +467,13 @@ function render() {
               <span>${escape(state.user.email || state.user.uid)}</span>
             </div>
           </div>
-          <button class="ghost" data-action="set-main-tab" data-tab="home">Início</button>
-          <button class="ghost" data-action="sync-ru">Atualizar RU</button>
-          <button class="ghost" data-action="logout">Trocar aluno</button>
-        </div>
-      </header>
-
-      <section class="hero-card">
-        <div class="hero-content">
-          <div class="hero-topline">Aplicativo do diretório acadêmico</div>
-          <div class="hero-band">
-            <span class="hero-chip">Perfil ${escape(shortUid(state.user.uid))}</span>
-            <span class="hero-chip">${escape(academicData?.profile?.course || "Curso não identificado")}</span>
-            <span class="hero-chip">${activeUpload ? "PDF importado" : "Envie o PDF do SCA"}</span>
-          </div>
-          <h2 class="hero-title">${escape(buildHeroTitle(activeUpload, academicData, todayClasses, nextClass))}</h2>
-          <p class="hero-subtitle">
-            ${escape(buildHeroSubtitle(academicData))}
-          </p>
-          <div class="hero-actions">
-            <div class="inline-field">
-              <label for="referenceDate">Data de referência</label>
-              <input id="referenceDate" type="date" value="${escape(state.referenceDate)}" />
-            </div>
-            <div class="button-row">
-              <button class="secondary" data-action="open-academic-tab" data-tab="${academicData ? "today" : "sca"}">${academicData ? "Ver agenda" : "Importar PDF"}</button>
-              <button class="ghost" data-action="set-main-tab" data-tab="dagv">Explorar o DAGV</button>
-            </div>
-          </div>
-          <div class="metrics-grid">
-            ${metric("PDFs salvos", String(totalUploads), "arquivos vinculados à sua conta")}
-            ${metric("Disciplinas", String(disciplineCount), disciplineCount ? "lidas do PDF" : "aguardando importação")}
-            ${metric("Aulas", String(classCount), classCount ? "blocos encontrados" : "horários ainda indisponíveis")}
-            ${metric("Hoje", String(todayClasses.length), nextClass ? `próxima: ${nextClass.startTime}` : "sem aula futura no recorte")}
-          </div>
+          <div class="toolbar-caption">${escape(APP_TAGLINE)}</div>
         </div>
       </section>
 
-      <nav class="primary-nav" aria-label="Abas do DAGV">
+      ${statusBanner}
+
+      <nav class="primary-nav primary-nav-minimal" aria-label="Abas do DAGV">
         ${MAIN_NAV_ITEMS.map(renderMainTabButton).join("")}
       </nav>
 
@@ -596,7 +563,6 @@ function renderMainPanel(activeUpload) {
 function renderPortalTab(activeUpload) {
   const academicData = getAcademicData(activeUpload);
   const schedule = academicData?.schedule || [];
-  const disciplines = academicData?.disciplines || [];
   const todayClasses = getClassesForDate(schedule, state.referenceDate);
   const nextClass = findNextClass(schedule, state.referenceDate);
   const menu = state.menu[0] || null;
@@ -612,109 +578,105 @@ function renderPortalTab(activeUpload) {
     links: "Links",
   };
   const descriptionMap = {
-    home: "Página inicial do diretório com visão geral, notícias e destaques do dia.",
-    elections: "Os gestores atualizam esta área no portal do DAGV e o aplicativo acompanha as mudanças.",
-    dagv: "Conteúdo institucional do DAGV incorporado no aplicativo, sem redirecionar o aluno.",
-    coordination: "Páginas das coordenações carregadas no app para consulta móvel.",
-    agenda: "Eventos acadêmicos e festas mostrados dentro da experiência do aplicativo.",
-    info: "Informações úteis do curso e da universidade incorporadas ao app.",
-    links: "Projetos e acessos do DAGV reunidos em leitura nativa.",
+    home: "Atalhos rápidos para RU, grade e conteúdos do diretório.",
+    elections: "Editais e chamadas do diretório.",
+    dagv: "Conteúdo institucional do DAGV.",
+    coordination: "Frentes e coordenações do diretório.",
+    agenda: "Eventos e agenda do curso.",
+    info: "Informações úteis da comunidade acadêmica.",
+    links: "Acessos rápidos do DAGV.",
   };
 
-  return `
-    <section class="section-stack">
-      ${state.activeTab === "home" ? `
-        <section class="overview-grid">
-          <article class="paper-card compact-card">
-            <div class="section-topline">Resumo do dia</div>
-            <h2 class="section-title">${escape(formatLongDate(state.referenceDate))}</h2>
-            <p class="section-copy">
-              ${todayClasses.length
-                ? `Você tem ${todayClasses.length} bloco${todayClasses.length > 1 ? "s" : ""} nesta data.`
-                : "Ainda não há aulas nesta data ou o PDF ainda não foi enviado."}
-            </p>
-            <div class="toast ${nextClass ? "" : "is-warning"}" style="margin-top: 1rem;">
-              ${nextClass
-                ? `Próxima aula: ${escape(nextClass.title)} em ${escape(nextClass.day)} às ${escape(nextClass.startTime)}.`
-                : "Sem próxima aula encontrada no período visível."}
-            </div>
-            <div class="button-row" style="margin-top: 1rem;">
-              <button class="secondary" data-action="open-academic-tab" data-tab="${academicData ? "today" : "sca"}">${academicData ? "Abrir agenda" : "Enviar PDF"}</button>
-            </div>
-          </article>
-
-          <article class="paper-card compact-card">
-            <div class="section-topline">RU Abadia</div>
-            <h2 class="section-title">${escape(menu?.mainDish || "Cardápio ainda indisponível")}</h2>
-            <p class="section-copy">${escape(menu ? `${menu.day} • ${formatDateShort(menu.date)}` : "Sem atualização disponível no momento.")}</p>
-            <div class="mini-stack" style="margin-top: 1rem;">
-              <div class="mini-card"><small>Opção</small><strong>${escape(menu?.option || "aguardando")}</strong><span>alternativa do dia</span></div>
-              <div class="mini-card"><small>Sobremesa</small><strong>${escape(menu?.dessert || "aguardando")}</strong><span>extra do RU</span></div>
-            </div>
-            <div class="button-row" style="margin-top: 1rem;">
-              <button class="ghost" data-action="open-academic-tab" data-tab="menu">Abrir RU</button>
-            </div>
-          </article>
-        </section>
-
-        <section class="shortcut-grid">
-          ${renderShortcutCard("Eleições DAGV", "Chamadas e atualizações do diretório", "set-main-tab", "elections")}
-          ${renderShortcutCard("DAGV", "História, estatuto e galeria", "set-main-tab", "dagv")}
-          ${renderShortcutCard("Coordenação", "Gestão e frentes ativas", "set-main-tab", "coordination")}
-          ${renderShortcutCard("Agenda Medicina", "Eventos e festas do curso", "set-main-tab", "agenda")}
-          ${renderShortcutCard("Informações", "Recados e apoios institucionais", "set-main-tab", "info")}
-          ${renderShortcutCard("Links", "Projetos e acessos rápidos", "set-main-tab", "links")}
-          ${renderShortcutCard("Acadêmico", "Hoje, semana, RU e SCA", "set-main-tab", "academic")}
-        </section>
-      ` : ""}
-
-      <section class="paper-card agenda-shell">
-        <div class="section-topline">${escape(titleMap[state.activeTab] || "Portal DAGV")}</div>
-        <h2 class="section-title">${escape(titleMap[state.activeTab] || "Portal DAGV")}</h2>
-        <p class="section-copy">${escape(descriptionMap[state.activeTab] || "Conteúdo do DAGV carregado dentro do aplicativo.")}</p>
-        <div class="button-row" style="margin-top: 1rem;">
-          <button class="ghost" data-action="refresh-portal-tab" data-tab="${escapeAttribute(state.activeTab)}">${state.portalLoadingTab === state.activeTab ? "Atualizando..." : "Atualizar conteúdo"}</button>
-          ${state.activeTab === "home" ? `<button class="ghost" data-action="set-main-tab" data-tab="academic">Abrir área acadêmica</button>` : ""}
-        </div>
-        ${state.portalError && state.portalLoadingTab !== state.activeTab ? `<div class="toast is-warning" style="margin-top: 1rem;">${escape(state.portalError)}</div>` : ""}
-      </section>
-
-      ${state.newsFeed.length ? `
-        <section class="section-stack">
-          <div class="section-topline">News do dia</div>
-          <div class="link-grid">
-            ${state.newsFeed.slice(0, 4).map(renderNewsCard).join("")}
+  if (state.activeTab === "home") {
+    return `
+      <section class="section-stack simple-stack">
+        <section class="paper-card dashboard-highlight">
+          <div class="section-topline">Resumo</div>
+          <h2 class="section-title">${escape(buildHeroTitle(activeUpload, academicData, todayClasses, nextClass))}</h2>
+          <p class="section-copy">${escape(buildHeroSubtitle(academicData))}</p>
+          <div class="button-row" style="margin-top: 1rem;">
+            <button class="secondary" data-action="open-academic-tab" data-tab="${academicData ? "today" : "sca"}">${academicData ? "Abrir agenda" : "Importar PDF"}</button>
+            <button class="ghost" data-action="set-main-tab" data-tab="dagv">Portal do DAGV</button>
           </div>
         </section>
-      ` : ""}
+
+        <section class="home-shortcuts">
+          ${renderHomeShortcut("HJ", "Hoje", "open-academic-tab", "today")}
+          ${renderHomeShortcut("RU", "RU", "open-academic-tab", "menu")}
+          ${renderHomeShortcut("GR", "Semana", "open-academic-tab", "week")}
+          ${renderHomeShortcut("PDF", "SCA", "open-academic-tab", "sca")}
+          ${renderHomeShortcut("DA", "DAGV", "set-main-tab", "dagv")}
+          ${renderHomeShortcut("LK", "Links", "set-main-tab", "links")}
+        </section>
+
+        <section class="paper-card simple-section">
+          <div class="section-header-row">
+            <div>
+              <div class="section-topline">Restaurante</div>
+              <h2 class="section-title">Hoje no RU Abadia</h2>
+            </div>
+            <button class="ghost" data-action="open-academic-tab" data-tab="menu">Ver tudo</button>
+          </div>
+          ${menu ? `
+            <div class="simple-list">
+              ${renderSimpleInfoRow("Prato principal", menu.mainDish || "Sem informação")}
+              ${renderSimpleInfoRow("Opção", menu.option || "Sem informação")}
+              ${renderSimpleInfoRow("Sobremesa", menu.dessert || "Sem informação")}
+            </div>
+          ` : `<div class="empty-state">Sem cardápio disponível agora.</div>`}
+        </section>
+
+        <section class="paper-card simple-section">
+          <div class="section-header-row">
+            <div>
+              <div class="section-topline">Grade horária</div>
+              <h2 class="section-title">Hoje</h2>
+            </div>
+            <div class="inline-field compact-date-field">
+              <label for="referenceDate">Data</label>
+              <input id="referenceDate" type="date" value="${escape(state.referenceDate)}" />
+            </div>
+          </div>
+          <div class="timeline-list">
+            ${activeUpload
+              ? (todayClasses.length
+                  ? todayClasses.map(renderSchedule).join("")
+                  : `<div class="empty-state">Nenhuma aula nesta data.</div>`)
+              : renderMissingPdfState("Importe o PDF do SCA para montar sua grade.")}
+          </div>
+        </section>
+
+        ${state.newsFeed.length ? `
+          <section class="section-stack">
+            <div class="section-topline">Últimas do DAGV</div>
+            <div class="link-grid compact-grid">
+              ${state.newsFeed.slice(0, 2).map(renderNewsCard).join("")}
+            </div>
+          </section>
+        ` : ""}
+      </section>
+    `;
+  }
+
+  return `
+    <section class="section-stack simple-stack">
+      <section class="paper-card agenda-shell simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">${escape(titleMap[state.activeTab] || "Portal DAGV")}</div>
+            <h2 class="section-title">${escape(titleMap[state.activeTab] || "Portal DAGV")}</h2>
+          </div>
+          <button class="ghost" data-action="refresh-portal-tab" data-tab="${escapeAttribute(state.activeTab)}">${state.portalLoadingTab === state.activeTab ? "Atualizando..." : "Atualizar conteúdo"}</button>
+        </div>
+        <p class="section-copy">${escape(descriptionMap[state.activeTab] || "Conteúdo do DAGV carregado dentro do aplicativo.")}</p>
+        ${state.portalError && state.portalLoadingTab !== state.activeTab ? `<div class="toast is-warning" style="margin-top: 1rem;">${escape(state.portalError)}</div>` : ""}
+      </section>
 
       ${state.portalLoadingTab === state.activeTab && !pages.length
         ? `<div class="empty-state">Carregando o conteúdo atualizado do DAGV...</div>`
         : pages.length
           ? `<section class="section-stack">${pages.map(renderPortalPage).join("")}</section>`
           : `<div class="empty-state">Ainda não consegui carregar o conteúdo desta aba. Toque em atualizar para tentar novamente.</div>`}
-
-      ${state.activeTab === "home" ? `
-        <section class="panel-grid">
-          <article class="paper-card">
-            <div class="section-topline">Prévia acadêmica</div>
-            <h2 class="section-title">${escape(academicData?.profile?.studentName || state.user.displayName || "Aluno")}</h2>
-            <div class="mini-grid" style="margin-top: 1rem;">
-              <div class="mini-card"><small>PDF ativo</small><strong>${activeUpload ? "Selecionado" : "Pendente"}</strong><span>${escape(activeUpload ? activeUpload.originalName : "envie o PDF do SCA")}</span></div>
-              <div class="mini-card"><small>Disciplinas</small><strong>${String(disciplines.length)}</strong><span>${escape(academicData?.profile?.course || "curso não identificado")}</span></div>
-              <div class="mini-card"><small>Próxima</small><strong>${escape(nextClass?.startTime || "--:--")}</strong><span>${escape(nextClass?.title || "sem aula futura")}</span></div>
-              <div class="mini-card"><small>Sincronização RU</small><strong>${escape(formatShortDateTime(state.lastMenuSync))}</strong><span>${escape(state.syncMessage)}</span></div>
-            </div>
-          </article>
-          <article class="paper-card">
-            <div class="section-topline">Gestão de conteúdo</div>
-            <h2 class="section-title">Os gestores atualizam no portal do DAGV, e o app acompanha.</h2>
-            <p class="section-copy">
-              O aplicativo agora incorpora páginas e notícias do portal do DAGV sem tirar o aluno da experiência móvel.
-            </p>
-          </article>
-        </section>
-      ` : ""}
     </section>
   `;
 }
@@ -733,16 +695,19 @@ function renderAcademicPanel(activeUpload) {
     }
 
     return `
-      <section class="section-stack">
-        ${renderAgendaHeader("Semana acadêmica", "Sua visão acadêmica semanal dentro do aplicativo.")}
-        <section class="paper-card">
-          <div class="section-topline">Semana acadêmica</div>
-          <h2 class="section-title">${escape(weekTitle(state.referenceDate))}</h2>
-          <p class="section-copy">
-            ${weekView.some((day) => day.classes.length)
-              ? "Sua semana foi organizada a partir do PDF importado."
-              : "O PDF foi salvo, mas não encontrei blocos de aula suficientes para montar a semana."}
-          </p>
+      <section class="section-stack simple-stack">
+        ${renderAgendaHeader("Semana")}
+        <section class="paper-card simple-section">
+          <div class="section-header-row">
+            <div>
+              <div class="section-topline">Grade</div>
+              <h2 class="section-title">${escape(weekTitle(state.referenceDate))}</h2>
+            </div>
+            <div class="inline-field compact-date-field">
+              <label for="referenceDate">Data</label>
+              <input id="referenceDate" type="date" value="${escape(state.referenceDate)}" />
+            </div>
+          </div>
           <div class="week-grid" style="margin-top: 1rem;">
             ${weekView.map(renderDayColumn).join("")}
           </div>
@@ -753,28 +718,19 @@ function renderAcademicPanel(activeUpload) {
 
   if (state.agendaTab === "menu") {
     return `
-      <section class="section-stack">
-        ${renderAgendaHeader("RU", "Acesso rápido ao cardápio diário dentro da área acadêmica.")}
-        <section class="panel-grid">
-          <article class="paper-card">
-            <div class="section-topline">Cardápio RU</div>
-            <h2 class="section-title">Cardápio do dia da Unidade Abadia</h2>
-            <p class="section-copy">
-              O painel consulta a publicação oficial do RU e mostra apenas o cardápio do dia, sem tirar o foco da identidade do DA.
-            </p>
-            <div class="menu-grid" style="margin-top: 1rem;">
-              ${state.menu.map(renderMenuCard).join("")}
+      <section class="section-stack simple-stack">
+        ${renderAgendaHeader("RU")}
+        <section class="paper-card simple-section">
+          <div class="section-header-row">
+            <div>
+              <div class="section-topline">Restaurante</div>
+              <h2 class="section-title">Unidade Abadia</h2>
             </div>
-          </article>
-          <aside class="timeline-card">
-            <div class="timeline-topline">Sincronização</div>
-            <h2 class="section-title">Atualização diária do RU da Abadia</h2>
-            <div class="mini-stack" style="margin-top: 1rem;">
-              <div class="mini-card"><small>Última publicação oficial</small><strong>${escape(formatShortDateTime(state.menu[0]?.updatedAt))}</strong><span>arquivo da Abadia</span></div>
-              <div class="mini-card"><small>Última verificação</small><strong>${escape(formatShortDateTime(state.lastMenuSync))}</strong><span>atualização do painel</span></div>
-              <div class="mini-card"><small>Status</small><strong>${escape(state.syncMessage)}</strong><span>fonte oficial do RU</span></div>
-            </div>
-          </aside>
+            <button class="ghost" data-action="sync-ru">Atualizar</button>
+          </div>
+          <div class="menu-grid simple-menu-grid" style="margin-top: 1rem;">
+            ${state.menu.map(renderMenuCard).join("")}
+          </div>
         </section>
       </section>
     `;
@@ -782,75 +738,59 @@ function renderAcademicPanel(activeUpload) {
 
   if (state.agendaTab === "sca") {
     return `
-      <section class="section-stack">
-        ${renderAgendaHeader("SCA", "Importe e revise o PDF do aluno dentro da área acadêmica.")}
-        <section class="upload-grid">
-          <article class="upload-card">
-            <div class="section-topline">Upload SCA</div>
-            <h2 class="section-title">Envie o PDF real do aluno</h2>
-            <p class="section-copy">
-              O arquivo oficial do SCA fica salvo na conta do aluno e, quando reconhecido, preenche a agenda do DA com aulas, semana e disciplinas.
-            </p>
-            <div class="upload-drop" style="margin-top: 1rem;">
-              <input id="pdfInput" class="file-input" type="file" accept="application/pdf,.pdf" />
-              <div class="button-row">
-                <label class="file-trigger" for="pdfInput">Selecionar PDF real</label>
-                <button class="ghost" data-action="refresh-uploads">Atualizar lista</button>
-              </div>
-              <ul>
-                <li>Formato esperado: “Relação de Disciplinas por Acadêmico”.</li>
-                <li>O PDF fica privado na conta do aluno.</li>
-                <li>Os dados extraídos podem ser acessados em outros aparelhos com o mesmo login.</li>
-              </ul>
+      <section class="section-stack simple-stack">
+        ${renderAgendaHeader("SCA")}
+        <section class="paper-card simple-section">
+          <div class="section-header-row">
+            <div>
+              <div class="section-topline">Upload</div>
+              <h2 class="section-title">PDF do SCA</h2>
             </div>
-            ${renderUploadStatus()}
-          </article>
-          <aside class="paper-card">
-            <div class="section-topline">PDF ativo</div>
-            <h2 class="section-title">${activeUpload ? escape(activeUpload.originalName) : "Nenhum PDF selecionado ainda"}</h2>
-            <div class="mini-stack" style="margin-top: 1rem;">
-              <div class="mini-card"><small>Aluno</small><strong>${escape(state.user.displayName || "Aluno")}</strong><span>${escape(state.user.email || state.user.uid)}</span></div>
-              <div class="mini-card"><small>Status do arquivo</small><strong>${escape(getUploadStatusLabel(activeUpload))}</strong><span>${escape(getExtractionCaption(activeUpload))}</span></div>
-              <div class="mini-card"><small>Último envio</small><strong>${escape(activeUpload ? formatShortDateTime(activeUpload.uploadedAtClient) : "sem envio")}</strong><span>${escape(activeUpload ? formatBytes(activeUpload.size) : "aguardando PDF")}</span></div>
-            </div>
-          </aside>
-        </section>
-        <section class="panel-grid">
-          <article class="paper-card">
-            <div class="section-topline">Dados do aluno</div>
-            <h2 class="section-title">${escape(academicData?.profile?.studentName || state.user.displayName || "Aluno")}</h2>
-            <div class="mini-grid" style="margin-top: 1rem;">
-              <div class="mini-card"><small>Matrícula</small><strong>${escape(academicData?.profile?.studentId || "não encontrada")}</strong><span>identificação acadêmica</span></div>
-              <div class="mini-card"><small>Curso</small><strong>${escape(academicData?.profile?.course || "não encontrado")}</strong><span>curso importado do PDF</span></div>
-              <div class="mini-card"><small>Período</small><strong>${escape(academicData?.profile?.period || "não encontrado")}</strong><span>período letivo</span></div>
-              <div class="mini-card"><small>Arquivo</small><strong>${escape(activeUpload ? activeUpload.originalName : "sem PDF")}</strong><span>${escape(academicData?.summary?.classCount ? `${academicData.summary.classCount} blocos carregados` : "envie o PDF oficial")}</span></div>
-            </div>
-          </article>
-          <aside class="paper-card">
-            <div class="section-topline">Resumo</div>
-            <h2 class="section-title">O que foi importado do PDF</h2>
-            <div class="mini-stack" style="margin-top: 1rem;">
-              <div class="mini-card"><small>Disciplinas</small><strong>${String(disciplines.length)}</strong><span>componentes reconhecidos</span></div>
-              <div class="mini-card"><small>Horários</small><strong>${String(schedule.length)}</strong><span>blocos identificados no semestre</span></div>
-              <div class="mini-card"><small>Páginas</small><strong>${escape(String(academicData?.profile?.pages || 0))}</strong><span>lidas do PDF</span></div>
-            </div>
-          </aside>
-        </section>
-        <section class="paper-card">
-          <div class="section-topline">Disciplinas</div>
-          <h2 class="section-title">Componentes encontrados no PDF</h2>
-          <div class="discipline-grid" style="margin-top: 1rem;">
-            ${disciplines.length ? disciplines.map(renderDiscipline).join("") : `<div class="empty-state">Ainda não consegui ler disciplinas deste arquivo. Tente reenviar o PDF oficial do SCA.</div>`}
+            <button class="ghost" data-action="refresh-uploads">Atualizar lista</button>
           </div>
+          <p class="section-copy">Envie o PDF oficial do aluno para preencher a agenda.</p>
+          <div class="upload-drop" style="margin-top: 1rem;">
+            <input id="pdfInput" class="file-input" type="file" accept="application/pdf,.pdf" />
+            <div class="button-row">
+              <label class="file-trigger" for="pdfInput">Selecionar PDF real</label>
+            </div>
+            ${activeUpload ? `
+              <div class="simple-meta-grid">
+                <div class="mini-card"><small>Arquivo ativo</small><strong>${escape(activeUpload.originalName)}</strong><span>${escape(formatBytes(activeUpload.size))}</span></div>
+                <div class="mini-card"><small>Status</small><strong>${escape(getUploadStatusLabel(activeUpload))}</strong><span>${escape(getExtractionCaption(activeUpload))}</span></div>
+              </div>
+            ` : ""}
+          </div>
+          ${renderUploadStatus()}
         </section>
-        <section class="paper-card">
-          <div class="section-topline">Arquivos da conta</div>
-          <h2 class="section-title">PDFs salvos na conta do aluno</h2>
-          <p class="section-copy">
-            Cada arquivo fica vinculado à conta online do aluno e pode ser definido como PDF ativo.
-          </p>
+
+        ${activeUpload ? `
+          <section class="paper-card simple-section">
+            <div class="section-header-row">
+              <div>
+                <div class="section-topline">Resumo</div>
+                <h2 class="section-title">${escape(academicData?.profile?.studentName || state.user.displayName || "Aluno")}</h2>
+              </div>
+              <button class="ghost" data-action="open-upload" data-upload-id="${escapeAttribute(activeUpload.id)}">Abrir PDF</button>
+            </div>
+            <div class="simple-meta-grid">
+              <div class="mini-card"><small>Matrícula</small><strong>${escape(academicData?.profile?.studentId || "não encontrada")}</strong><span>${escape(academicData?.profile?.period || "período não encontrado")}</span></div>
+              <div class="mini-card"><small>Curso</small><strong>${escape(academicData?.profile?.course || "não encontrado")}</strong><span>${String(disciplines.length)} disciplinas</span></div>
+              <div class="mini-card"><small>Horários</small><strong>${String(schedule.length)}</strong><span>blocos importados</span></div>
+              <div class="mini-card"><small>PDFs</small><strong>${String(state.uploads.length)}</strong><span>arquivos na conta</span></div>
+            </div>
+          </section>
+        ` : ""}
+
+        <section class="paper-card simple-section">
+          <div class="section-header-row">
+            <div>
+              <div class="section-topline">Arquivos</div>
+              <h2 class="section-title">PDFs salvos</h2>
+            </div>
+          </div>
           <div class="upload-list" style="margin-top: 1rem;">
-            ${state.uploads.length ? state.uploads.map((item) => renderUploadItem(item, activeUpload)).join("") : `<div class="empty-state">Nenhum PDF enviado ainda. Faça o primeiro upload para vincular o arquivo à conta do aluno.</div>`}
+            ${state.uploads.length ? state.uploads.map((item) => renderUploadItem(item, activeUpload)).join("") : `<div class="empty-state">Nenhum PDF enviado ainda.</div>`}
           </div>
         </section>
       </section>
@@ -858,47 +798,46 @@ function renderAcademicPanel(activeUpload) {
   }
 
   return `
-    <section class="section-stack">
-      ${renderAgendaHeader("Hoje", "Visualização diária do aluno dentro do aplicativo.")}
-      <section class="panel-grid">
-        <article class="timeline-card">
-          <div class="timeline-topline">Hoje</div>
-          <h2 class="section-title">${escape(formatLongDate(state.referenceDate))}</h2>
-          <p class="section-copy">
-            ${todayClasses.length
-              ? `Você tem ${todayClasses.length} bloco${todayClasses.length > 1 ? "s" : ""} programado${todayClasses.length > 1 ? "s" : ""} nesta data.`
-              : "Não encontrei aulas nesta data no PDF importado."}
-          </p>
-          <div class="toast ${nextClass ? "" : "is-warning"}">
-            ${nextClass
-              ? `Próxima aula: ${escape(nextClass.title)} em ${escape(nextClass.day)} às ${escape(nextClass.startTime)}.`
-              : "Ainda não encontrei uma próxima aula a partir da data selecionada."}
+    <section class="section-stack simple-stack">
+      ${renderAgendaHeader("Hoje")}
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Agenda</div>
+            <h2 class="section-title">${escape(formatLongDate(state.referenceDate))}</h2>
           </div>
-          <div class="timeline-list" style="margin-top: 1rem;">
-            ${activeUpload ? (todayClasses.length ? todayClasses.map(renderSchedule).join("") : `<div class="empty-state">Não há aulas nesta data. Tente mudar a data de referência.</div>`) : renderMissingPdfState("Importe o PDF do SCA para carregar sua agenda de hoje.")}
+          <div class="inline-field compact-date-field">
+            <label for="referenceDate">Data</label>
+            <input id="referenceDate" type="date" value="${escape(state.referenceDate)}" />
           </div>
-        </article>
-        <aside class="paper-card">
-          <div class="section-topline">Resumo local</div>
-          <h2 class="section-title">${escape(academicData?.profile?.studentName || "Dados do aluno")}</h2>
-          <div class="mini-grid" style="margin-top: 1rem;">
-            <div class="mini-card"><small>Matrícula</small><strong>${escape(academicData?.profile?.studentId || "não encontrada")}</strong><span>${escape(academicData?.profile?.period || "período não encontrado")}</span></div>
-            <div class="mini-card"><small>PDF ativo</small><strong>${activeUpload ? "Selecionado" : "Pendente"}</strong><span>${escape(activeUpload ? activeUpload.originalName : "envie pela aba SCA")}</span></div>
-            <div class="mini-card"><small>Disciplinas</small><strong>${String(disciplines.length)}</strong><span>${escape(academicData?.profile?.course || "curso não encontrado")}</span></div>
-            <div class="mini-card"><small>Semana</small><strong>${String(weekView.reduce((acc, day) => acc + day.classes.length, 0))}</strong><span>blocos visíveis na semana</span></div>
-          </div>
-        </aside>
+        </div>
+        <div class="timeline-list" style="margin-top: 1rem;">
+          ${activeUpload
+            ? (todayClasses.length
+                ? todayClasses.map(renderSchedule).join("")
+                : `<div class="empty-state">Nenhuma aula nesta data.</div>`)
+            : renderMissingPdfState("Importe o PDF do SCA para carregar sua agenda.")}
+        </div>
       </section>
+
+      ${activeUpload ? `
+        <section class="paper-card simple-section">
+          <div class="simple-meta-grid">
+            <div class="mini-card"><small>Próxima aula</small><strong>${escape(nextClass?.startTime || "--:--")}</strong><span>${escape(nextClass?.title || "sem aula futura")}</span></div>
+            <div class="mini-card"><small>PDF ativo</small><strong>${escape(activeUpload.originalName)}</strong><span>${escape(academicData?.profile?.course || "curso não encontrado")}</span></div>
+            <div class="mini-card"><small>Semana</small><strong>${String(weekView.reduce((acc, day) => acc + day.classes.length, 0))}</strong><span>blocos visíveis</span></div>
+          </div>
+        </section>
+      ` : ""}
     </section>
   `;
 }
 
-function renderAgendaHeader(title, description) {
+function renderAgendaHeader(title) {
   return `
-    <section class="paper-card agenda-shell">
+    <section class="paper-card agenda-shell simple-section">
       <div class="section-topline">Acadêmico</div>
       <h2 class="section-title">${escape(title)}</h2>
-      <p class="section-copy">${escape(description)}</p>
       <div class="segmented-control" style="margin-top: 1rem;">
         ${AGENDA_NAV_ITEMS.map(renderAgendaTabButton).join("")}
       </div>
@@ -937,13 +876,9 @@ function renderUploadItem(item, activeUpload) {
         </div>
         <span class="tag">${escape(getUploadStatusLabel(item))}</span>
       </div>
-      <div class="item-meta">
-        <span class="tag">${isActive ? "PDF ativo" : "PDF da conta"}</span>
-        <span class="tag">${escape(getExtractionCaption(item))}</span>
-      </div>
       <div class="button-row" style="margin-top: 0.75rem;">
-        ${isActive ? "" : `<button class="ghost" data-action="set-active-upload" data-upload-id="${escapeAttribute(item.id)}">Definir como ativo</button>`}
-        <button class="ghost" data-action="open-upload" data-upload-id="${escapeAttribute(item.id)}">${state.openingUploadId === item.id ? "Abrindo..." : "Abrir PDF"}</button>
+        ${isActive ? `<span class="tag">PDF ativo</span>` : `<button class="ghost" data-action="set-active-upload" data-upload-id="${escapeAttribute(item.id)}">Definir ativo</button>`}
+        <button class="ghost" data-action="open-upload" data-upload-id="${escapeAttribute(item.id)}">${state.openingUploadId === item.id ? "Abrindo..." : "Abrir"}</button>
       </div>
     </article>
   `;
@@ -951,12 +886,11 @@ function renderUploadItem(item, activeUpload) {
 
 function renderMenuCard(item) {
   return `
-    <article class="menu-card">
+    <article class="menu-card simple-menu-card">
       <div class="menu-top">
         <h3 class="menu-title">${escape(item.unit)}</h3>
-        <span class="tag">${escape(formatLongDate(item.date))}</span>
+        <span class="tag">${escape(formatDateShort(item.date))}</span>
       </div>
-      <section class="menu-section"><h4>Dia</h4><p>${escape(item.day)}</p></section>
       <section class="menu-section"><h4>Prato principal</h4><p>${escape(item.mainDish)}</p></section>
       <section class="menu-section"><h4>Opção</h4><p>${escape(item.option)}</p></section>
       <section class="menu-section"><h4>Guarnição</h4><p>${escape(item.garnish)}</p></section>
@@ -964,14 +898,13 @@ function renderMenuCard(item) {
       <section class="menu-section"><h4>Saladas</h4><p>${escape(item.salads)}</p></section>
       <section class="menu-section"><h4>Sobremesa</h4><p>${escape(item.dessert)}</p></section>
       <section class="menu-section"><h4>Refresco</h4><p>${escape(item.drink)}</p></section>
-      <section class="menu-section"><h4>Origem</h4><p>${escape(item.sourceTitle)}</p></section>
     </article>
   `;
 }
 
 function renderMainTabButton(item) {
   return `
-    <button class="tab-button ${state.activeTab === item.id ? "is-active" : ""}" data-action="set-main-tab" data-tab="${item.id}">
+    <button class="tab-button compact-tab ${state.activeTab === item.id ? "is-active" : ""}" data-action="set-main-tab" data-tab="${item.id}">
       ${item.label}
     </button>
   `;
@@ -979,7 +912,7 @@ function renderMainTabButton(item) {
 
 function renderAgendaTabButton(item) {
   return `
-    <button class="segmented-button ${state.agendaTab === item.id ? "is-active" : ""}" data-action="set-agenda-tab" data-tab="${item.id}">
+    <button class="segmented-button compact-segment ${state.agendaTab === item.id ? "is-active" : ""}" data-action="set-agenda-tab" data-tab="${item.id}">
       ${item.label}
     </button>
   `;
@@ -1018,7 +951,7 @@ function renderPortalBlock(block) {
 
 function renderNewsCard(item) {
   return `
-    <article class="paper-card news-card">
+    <article class="paper-card news-card simple-section">
       <div class="section-topline">${escape(item.sourceLabel || "Atualização")}</div>
       <h3 class="schedule-title">${escape(item.title || "Notícia")}</h3>
       <p class="section-copy">${escape(item.summary || "Sem resumo disponível.")}</p>
@@ -1052,7 +985,6 @@ function renderInlineLink(item) {
 function renderShortcutCard(title, caption, action, tab) {
   return `
     <button class="paper-card shortcut-card" data-action="${escapeAttribute(action)}" data-tab="${escapeAttribute(tab)}">
-      <span class="tag">Acesso rápido</span>
       <strong>${escape(title)}</strong>
       <span>${escape(caption)}</span>
     </button>
@@ -1065,6 +997,57 @@ function renderAvatar(user) {
 
 function metric(label, value, caption) {
   return `<div class="metric-card"><small>${escape(label)}</small><strong>${escape(value)}</strong><span>${escape(caption)}</span></div>`;
+}
+
+function getScreenTitle() {
+  if (state.activeTab === "academic") {
+    const agendaTitleMap = {
+      today: "Grade Horária",
+      week: "Semana",
+      menu: "RU",
+      sca: "PDF do SCA",
+    };
+    return agendaTitleMap[state.agendaTab] || "Acadêmico";
+  }
+
+  const mainTitleMap = {
+    home: "Início",
+    elections: "Eleições",
+    dagv: "DAGV",
+    coordination: "Coordenação",
+    agenda: "Agenda",
+    info: "Informações",
+    links: "Links",
+  };
+
+  return mainTitleMap[state.activeTab] || APP_NAME;
+}
+
+function renderStatusBanner() {
+  const message = state.uploadError || state.authError || (state.uploadProgress > 0 ? state.uploadMessage : "");
+  if (!message) {
+    return "";
+  }
+
+  return `<div class="toast ${state.uploadError || state.authError ? "is-danger" : ""} compact-toast">${escape(message)}</div>`;
+}
+
+function renderHomeShortcut(mark, label, action, tab) {
+  return `
+    <button class="quick-button" data-action="${escapeAttribute(action)}" data-tab="${escapeAttribute(tab)}">
+      <span class="quick-button-mark">${escape(mark)}</span>
+      <span class="quick-button-label">${escape(label)}</span>
+    </button>
+  `;
+}
+
+function renderSimpleInfoRow(label, value) {
+  return `
+    <div class="simple-info-row">
+      <span>${escape(label)}</span>
+      <strong>${escape(value)}</strong>
+    </div>
+  `;
 }
 
 async function onClick(event) {
