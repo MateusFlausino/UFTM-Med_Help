@@ -93,6 +93,8 @@ const defaultMenu = [
 const appElement = document.getElementById("app");
 const uiState = loadUiState();
 let localDbPromise = null;
+let persistentUploadsAvailable = true;
+let persistentUploadsIssue = "";
 
 let state = {
   activeTab: uiState.activeTab || "home",
@@ -132,11 +134,17 @@ async function init() {
 
   try {
     await openLocalDb();
+  } catch (error) {
+    persistentUploadsAvailable = false;
+    persistentUploadsIssue = describeLocalError(error);
+  }
+
+  try {
     await restoreLocalSession();
   } catch (error) {
     setState({
       authChecking: false,
-      authError: `Não consegui abrir o armazenamento local deste aparelho: ${describeLocalError(error)}`,
+      authError: `Não consegui abrir o perfil local deste aparelho: ${describeLocalError(error)}`,
     });
   }
 
@@ -149,25 +157,32 @@ async function restoreLocalSession() {
   if (!session) {
     setState({
       authChecking: false,
-      syncMessage: "Painel do DA pronto. Abra seu perfil neste aparelho para enviar o PDF do SCA.",
+      authError: persistentUploadsAvailable ? "" : buildSessionStorageMessage(),
+      syncMessage: persistentUploadsAvailable
+        ? "Painel do DA pronto. Abra seu perfil neste aparelho para enviar o PDF do SCA."
+        : "Painel do DA pronto em modo de sessão. Abra seu perfil para importar o PDF mesmo sem armazenamento persistente.",
     });
     return;
   }
 
   const profile = ensureStoredProfile(session);
-  const uploads = await listUploadsForUser(session.uid);
+  const uploads = persistentUploadsAvailable
+    ? mergeUploads(await listUploadsForUser(session.uid), getTransientUploadsForUser(session.uid))
+    : getSessionUploadsForUser(session.uid);
   const nextProfile = ensureActiveUploadProfile(profile, uploads);
 
   setState({
     authChecking: false,
-    authError: "",
+    authError: persistentUploadsAvailable ? "" : buildSessionStorageMessage(),
     user: session,
     profile: nextProfile,
     uploads,
     uploadError: "",
     uploadMessage: uploads.length
       ? "Perfil restaurado com seus arquivos salvos neste aparelho."
-      : "Perfil restaurado. Envie o primeiro PDF do SCA.",
+      : persistentUploadsAvailable
+        ? "Perfil restaurado. Envie o primeiro PDF do SCA."
+        : "Perfil restaurado em modo de sessão. O PDF ficará disponível até recarregar a página.",
   });
 }
 
@@ -685,6 +700,7 @@ function renderUploadItem(item, activeUpload) {
       </div>
       <div class="item-meta">
         <span class="tag">${isActive ? "PDF ativo" : "PDF local"}</span>
+        ${item.isTransient ? `<span class="tag">Só nesta sessão</span>` : ""}
         <span class="tag">${escape(getExtractionCaption(item))}</span>
       </div>
       <div class="button-row" style="margin-top: 0.75rem;">
@@ -939,19 +955,23 @@ async function loginLocal() {
   try {
     saveSession(user);
     const profile = ensureStoredProfile(user);
-    const uploads = await listUploadsForUser(user.uid);
+    const uploads = persistentUploadsAvailable
+      ? mergeUploads(await listUploadsForUser(user.uid), getTransientUploadsForUser(user.uid))
+      : getSessionUploadsForUser(user.uid);
     const nextProfile = ensureActiveUploadProfile(profile, uploads);
 
     setState({
       authChecking: false,
-      authError: "",
+      authError: persistentUploadsAvailable ? "" : buildSessionStorageMessage(),
       user,
       profile: nextProfile,
       uploads,
       uploadError: "",
       uploadMessage: uploads.length
         ? "Perfil reencontrado neste aparelho."
-        : "Perfil criado. Agora envie o PDF oficial do SCA.",
+        : persistentUploadsAvailable
+          ? "Perfil criado. Agora envie o PDF oficial do SCA."
+          : "Perfil criado em modo de sessão. O PDF será lido e mantido só até recarregar a página.",
       activeTab: uploads.length ? state.activeTab : "academic",
       agendaTab: uploads.length ? state.agendaTab : "sca",
     });
@@ -981,8 +1001,17 @@ function logout() {
 async function refreshLocalUploads() {
   if (!state.user) return;
 
+  if (!persistentUploadsAvailable) {
+    setState({
+      uploads: getSessionUploadsForUser(state.user.uid),
+      uploadError: "",
+      uploadMessage: "Este navegador não liberou armazenamento persistente. Mostrando apenas os PDFs desta sessão.",
+    });
+    return;
+  }
+
   try {
-    const uploads = await listUploadsForUser(state.user.uid);
+    const uploads = mergeUploads(await listUploadsForUser(state.user.uid), getTransientUploadsForUser(state.user.uid));
     const profile = ensureActiveUploadProfile(loadStoredProfile(state.user.uid) || ensureStoredProfile(state.user), uploads);
     setState({
       profile,
@@ -1044,6 +1073,13 @@ async function uploadPdf(file, inputElement) {
       academicData,
       blob: file,
     };
+    const nextProfile = {
+      ...(loadStoredProfile(state.user.uid) || ensureStoredProfile(state.user)),
+      activeUploadId: uploadId,
+      activeUploadName: file.name,
+      lastUploadAtClient: uploadedAtClient,
+      updatedAt: uploadedAtClient,
+    };
 
     setState({
       uploadProgress: 56,
@@ -1051,29 +1087,67 @@ async function uploadPdf(file, inputElement) {
       uploadError: "",
     });
 
-    await saveUploadRecord(record);
-    setState({
-      uploadProgress: 82,
-      uploadMessage: "Salvando os dados deste aluno neste aparelho...",
-      uploadError: "",
-    });
+    if (persistentUploadsAvailable) {
+      try {
+        await saveUploadRecord(record);
+        setState({
+          uploadProgress: 82,
+          uploadMessage: "Salvando os dados deste aluno neste aparelho...",
+          uploadError: "",
+        });
 
-    const profile = saveStoredProfile({
-      ...(loadStoredProfile(state.user.uid) || ensureStoredProfile(state.user)),
-      activeUploadId: uploadId,
-      activeUploadName: file.name,
-      lastUploadAtClient: uploadedAtClient,
-      updatedAt: uploadedAtClient,
-    });
-    const uploads = await listUploadsForUser(state.user.uid);
+        const profile = saveStoredProfile(nextProfile);
+        const uploads = mergeUploads(
+          await listUploadsForUser(state.user.uid),
+          getTransientUploadsForUser(state.user.uid).filter((item) => item.id !== uploadId),
+        );
+
+        setState({
+          authError: "",
+          profile,
+          uploads,
+          uploadProgress: 100,
+          uploadMessage: academicData.schedule.length || academicData.disciplines.length
+            ? "PDF importado com sucesso. Sua agenda acadêmica já foi preenchida."
+            : "PDF salvo, mas não consegui reconhecer todos os dados acadêmicos.",
+          uploadError: "",
+          referenceDate: suggestReferenceDate(academicData.schedule, state.referenceDate),
+        });
+        return;
+      } catch (storageError) {
+        persistentUploadsAvailable = false;
+        persistentUploadsIssue = describeLocalError(storageError);
+      }
+    }
+
+    let profile = nextProfile;
+    try {
+      profile = saveStoredProfile(nextProfile);
+    } catch (profileError) {
+      // segue com os dados em memória para não descartar a extração já concluída
+    }
+
+    const transientRecord = {
+      ...record,
+      isTransient: true,
+      storagePath: `session://${state.user.uid}/${uploadId}/${normalizeFileName(file.name)}`,
+      notes: academicData.schedule.length || academicData.disciplines.length
+        ? "Arquivo importado para esta sessão."
+        : "Arquivo lido para esta sessão, mas com dados acadêmicos parciais.",
+    };
+    const uploads = mergeUploads(
+      state.uploads.filter((item) => item.ownerUid === state.user.uid && item.id !== uploadId),
+      [transientRecord],
+    );
 
     setState({
+      authError: buildSessionStorageMessage(),
       profile,
       uploads,
       uploadProgress: 100,
       uploadMessage: academicData.schedule.length || academicData.disciplines.length
-        ? "PDF importado com sucesso. Sua agenda acadêmica já foi preenchida."
-        : "PDF salvo, mas não consegui reconhecer todos os dados acadêmicos.",
+        ? "PDF lido com sucesso. A agenda foi preenchida, mas o arquivo ficará disponível só nesta sessão."
+        : "PDF lido nesta sessão, mas com reconhecimento parcial dos dados acadêmicos.",
       uploadError: "",
       referenceDate: suggestReferenceDate(academicData.schedule, state.referenceDate),
     });
@@ -1191,7 +1265,8 @@ async function openUpload(uploadId) {
   setState({ openingUploadId: uploadId, uploadError: "", uploadMessage: "Abrindo o PDF salvo localmente..." });
 
   try {
-    const record = await getUploadRecord(uploadId);
+    const transientRecord = state.uploads.find((item) => item.id === uploadId && item.blob);
+    const record = transientRecord || await getUploadRecord(uploadId);
     if (!record || !record.blob) {
       throw new Error("arquivo não encontrado no armazenamento local");
     }
@@ -1304,6 +1379,8 @@ function getExtractionCaption(upload) {
 
 function getUploadStatusLabel(upload) {
   if (!upload) return "Sem arquivo";
+  if (upload.isTransient && upload.status === "processed") return "Importado";
+  if (upload.isTransient && upload.status === "limited") return "Parcial";
   if (upload.status === "processed") return "Importado";
   if (upload.status === "limited") return "Importado parcialmente";
   if (upload.status === "uploaded") return "Salvo";
@@ -1470,6 +1547,25 @@ function setState(patch, options = {}) {
   if (shouldRender) {
     render();
   }
+}
+
+function getTransientUploadsForUser(ownerUid) {
+  return state.uploads.filter((item) => item.isTransient && item.ownerUid === ownerUid);
+}
+
+function getSessionUploadsForUser(ownerUid) {
+  return state.uploads.filter((item) => item.ownerUid === ownerUid);
+}
+
+function mergeUploads(primary, extra = []) {
+  return uniqueBy([...(extra || []), ...(primary || [])], (item) => item.id)
+    .sort((left, right) => String(right.uploadedAtClient || "").localeCompare(String(left.uploadedAtClient || "")));
+}
+
+function buildSessionStorageMessage() {
+  return persistentUploadsIssue
+    ? `Não consegui abrir o armazenamento local deste navegador (${persistentUploadsIssue}). Vou manter o PDF apenas nesta sessão.`
+    : "Não consegui abrir o armazenamento local deste navegador. Vou manter o PDF apenas nesta sessão.";
 }
 
 function loadSession() {
