@@ -7,6 +7,12 @@ const APP_TAGLINE = "Horários, RU e SCA no espaço do DA";
 const DA_PORTAL_URL = "https://dagvmeduftm.wordpress.com/";
 const SUPABASE_CONFIG_FILE = "supabase-config.js";
 const SUPABASE_BUCKET = "student-pdfs";
+const REGISTRATION_TAB_ID = "registration";
+const DOCUMENT_TYPES = {
+  schedule: "schedule",
+  studentCard: "student_card",
+};
+const PENDING_REGISTRATION_MESSAGE = "Aguardando finalização do cadastro. Envie a grade horária e a carteirinha estudantil para liberar o app.";
 
 const UI_STORAGE_KEY = "uftm-mobile-local-ui-v1";
 const SESSION_STORAGE_KEY = "uftm-mobile-local-session-v1";
@@ -32,7 +38,16 @@ const AGENDA_NAV_ITEMS = [
   { id: "today", label: "Hoje" },
   { id: "week", label: "Semana" },
   { id: "menu", label: "RU" },
-  { id: "sca", label: "SCA" },
+];
+
+const SIDEBAR_ITEMS = [
+  { id: "home", label: "Inicio", mark: "IN", action: "set-main-tab", tab: "home" },
+  { id: REGISTRATION_TAB_ID, label: "Cadastro", mark: "CA", action: "open-registration" },
+  { id: "student-card", label: "ID Digital", mark: "ID", action: "open-student-card" },
+  { id: "today", label: "Grade Horaria", mark: "GR", action: "open-academic-tab", tab: "today" },
+  { id: "menu", label: "Restaurantes", mark: "RU", action: "open-academic-tab", tab: "menu" },
+  { id: "dagv", label: "DAGV", mark: "DA", action: "set-main-tab", tab: "dagv" },
+  { id: "links", label: "Links", mark: "LK", action: "set-main-tab", tab: "links" },
 ];
 
 const DAGV_LINKS = [
@@ -108,6 +123,7 @@ let authSubscription = null;
 let state = {
   activeTab: uiState.activeTab || "home",
   agendaTab: uiState.agendaTab || "today",
+  sidebarOpen: Boolean(uiState.sidebarOpen),
   referenceDate: uiState.referenceDate || toISO(new Date()),
   menu: Array.isArray(uiState.menu) && uiState.menu.length ? uiState.menu : defaultMenu,
   lastMenuSync: uiState.lastMenuSync || "",
@@ -212,6 +228,7 @@ async function handleSupabaseSession(session) {
       openingUploadId: "",
       activeTab: "home",
       agendaTab: "today",
+      sidebarOpen: false,
     });
     return;
   }
@@ -250,12 +267,14 @@ async function handleSupabaseSession(session) {
       },
       profile,
       uploads,
-      activeTab: uploads.length ? state.activeTab : "academic",
-      agendaTab: uploads.length ? state.agendaTab : "sca",
+      activeTab: hasCompletedRegistration(uploads, profile) ? state.activeTab : REGISTRATION_TAB_ID,
+      agendaTab: hasCompletedRegistration(uploads, profile) ? state.agendaTab : "today",
       uploadError: "",
       uploadMessage: uploads.length
-        ? "Conta conectada. Seus PDFs privados foram sincronizados."
-        : "Conta conectada. Envie o primeiro PDF do SCA para montar a agenda.",
+        ? hasCompletedRegistration(uploads, profile)
+          ? "Conta conectada. Seus documentos privados foram sincronizados."
+          : PENDING_REGISTRATION_MESSAGE
+        : "Conta conectada. Envie a grade horaria e a carteirinha estudantil para liberar o painel.",
     });
   } catch (error) {
     setState({
@@ -325,8 +344,10 @@ async function loadRemoteAccountData(userUid) {
 
 async function reloadRemoteAccountData(userUid) {
   const { profile, uploads } = await loadRemoteAccountData(userUid);
-  const activeUpload = uploads.find((item) => item.id === profile.activeUploadId) || uploads[0] || null;
+  const scheduleUploads = uploads.filter((item) => item.documentType !== DOCUMENT_TYPES.studentCard);
+  const activeUpload = scheduleUploads.find((item) => item.id === profile.activeUploadId) || scheduleUploads[0] || null;
   const academicData = getAcademicData(activeUpload);
+  const registrationComplete = hasCompletedRegistration(uploads, profile);
 
   setState({
     user: state.user
@@ -339,8 +360,8 @@ async function reloadRemoteAccountData(userUid) {
       : state.user,
     profile,
     uploads,
-    activeTab: uploads.length ? state.activeTab : "academic",
-    agendaTab: uploads.length ? state.agendaTab : "sca",
+    activeTab: registrationComplete ? state.activeTab : REGISTRATION_TAB_ID,
+    agendaTab: registrationComplete ? state.agendaTab : "today",
     referenceDate: academicData?.schedule?.length
       ? suggestReferenceDate(academicData.schedule, state.referenceDate)
       : state.referenceDate,
@@ -411,12 +432,13 @@ function normalizeSupabaseProfileRow(row, fallbackUid = "") {
 }
 
 function normalizeSupabaseUploadRow(row) {
+  const storagePath = String(row?.storage_path || "");
   return {
     id: String(row?.id || ""),
     ownerUid: String(row?.owner_uid || ""),
     originalName: String(row?.original_name || "PDF sem nome"),
     normalizedName: String(row?.normalized_name || ""),
-    storagePath: String(row?.storage_path || ""),
+    storagePath,
     size: Number(row?.size || 0),
     contentType: String(row?.content_type || "application/pdf"),
     status: String(row?.status || "uploaded"),
@@ -426,7 +448,23 @@ function normalizeSupabaseUploadRow(row) {
     createdAt: String(row?.created_at || ""),
     notes: String(row?.notes || ""),
     academicData: row?.academic_data || null,
+    documentType: inferDocumentTypeFromStoragePath(storagePath, row?.parser_status),
   };
+}
+
+function inferDocumentTypeFromStoragePath(storagePath, parserStatus = "") {
+  const parts = String(storagePath || "").split("/").filter(Boolean);
+  if (parts[1] === "student-card" || String(parserStatus || "").startsWith("student_card")) {
+    return DOCUMENT_TYPES.studentCard;
+  }
+  return DOCUMENT_TYPES.schedule;
+}
+
+function hasCompletedRegistration(uploads, profile) {
+  const scheduleUploads = (uploads || []).filter((item) => item.documentType !== DOCUMENT_TYPES.studentCard);
+  const studentCardUploads = (uploads || []).filter((item) => item.documentType === DOCUMENT_TYPES.studentCard);
+  const activeSchedule = scheduleUploads.find((item) => item.id === profile?.activeUploadId) || scheduleUploads[0] || null;
+  return Boolean(activeSchedule && studentCardUploads[0]);
 }
 
 function stopUserSubscriptions() {
@@ -439,45 +477,46 @@ function render() {
     return;
   }
 
-  const activeUpload = getActiveUpload();
-  const statusBanner = renderStatusBanner();
+  const registration = getRegistrationState();
+  const activeUpload = registration.scheduleUpload;
+  const statusBanner = renderStatusBanner(registration);
 
   appElement.innerHTML = `
-    <div class="app-view ios-shell campus-shell">
-      <header class="header-bar compact-header">
-        <button class="brand-mark brand-mark-button" data-action="set-main-tab" data-tab="home">${APP_MARK}</button>
-        <div class="header-brand header-brand-centered">
-          <div class="header-copy">
-            <span class="header-kicker">Painel do DAGV</span>
-            <h1>${escape(getScreenTitle())}</h1>
-          </div>
-        </div>
-        <div class="button-row">
-          <button class="ghost header-action" data-action="sync-ru">RU</button>
-          <button class="ghost header-action" data-action="logout">Sair</button>
-        </div>
-      </header>
-
-      <section class="toolbar-strip">
-        <div class="user-line">
-          <div class="user-chip">
-            ${renderAvatar(state.user)}
-            <div>
-              <strong>${escape(state.user.displayName || "Aluno")}</strong>
-              <span>${escape(state.user.email || state.user.uid)}</span>
+    <div class="app-frame ${state.sidebarOpen ? "is-sidebar-open" : ""}">
+      <button class="sidebar-backdrop ${state.sidebarOpen ? "is-visible" : ""}" data-action="close-sidebar" aria-label="Fechar menu lateral"></button>
+      ${renderSidebar(registration)}
+      <div class="app-view ios-shell campus-shell">
+        <header class="header-bar compact-header">
+          <button class="brand-mark brand-mark-button menu-toggle" data-action="toggle-sidebar">Menu</button>
+          <div class="header-brand header-brand-centered">
+            <div class="header-copy">
+              <span class="header-kicker">Painel do DAGV</span>
+              <h1>${escape(getScreenTitle())}</h1>
             </div>
           </div>
-          <div class="toolbar-caption">${escape(APP_TAGLINE)}</div>
-        </div>
-      </section>
+          <div class="button-row">
+            ${registration.isComplete ? `<button class="ghost header-action" data-action="sync-ru">RU</button>` : `<span class="header-pill">Cadastro pendente</span>`}
+            <button class="ghost header-action" data-action="logout">Sair</button>
+          </div>
+        </header>
 
-      ${statusBanner}
+        <section class="toolbar-strip">
+          <div class="user-line">
+            <div class="user-chip">
+              ${renderAvatar(state.user)}
+              <div>
+                <strong>${escape(state.user.displayName || "Aluno")}</strong>
+                <span>${escape(state.user.email || state.user.uid)}</span>
+              </div>
+            </div>
+            <div class="toolbar-caption">${escape(APP_TAGLINE)}</div>
+          </div>
+        </section>
 
-      <nav class="primary-nav primary-nav-minimal" aria-label="Abas do DAGV">
-        ${MAIN_NAV_ITEMS.map(renderMainTabButton).join("")}
-      </nav>
+        ${statusBanner}
 
-      ${renderMainPanel(activeUpload)}
+        ${renderMainPanel(activeUpload, registration)}
+      </div>
     </div>
   `;
 }
@@ -489,13 +528,13 @@ function renderLogin() {
     ? `Configure o arquivo ${SUPABASE_CONFIG_FILE} para habilitar login Google e PDFs privados na nuvem.`
     : !state.canUseGoogleAuth
       ? "Abra o app em http://localhost:4173 ou no deploy para usar o login Google."
-      : "Entre com sua conta Google para guardar PDFs do SCA na nuvem e acessar a agenda em qualquer aparelho.";
+      : "Entre com sua conta Google para guardar a grade horaria e a carteirinha estudantil antes do primeiro uso.";
 
   return `
     <div class="login-layout">
       <section class="login-card">
         <span class="eyebrow">Painel do DA</span>
-        <h1>${APP_NAME}, com login Google e PDFs privados na nuvem.</h1>
+        <h1>${APP_NAME}, com login Google e documentos privados na nuvem.</h1>
         <p>${escape(setupTitle)}</p>
         <div class="login-actions" style="margin-top: 1rem;">
           <button class="cta" data-action="login-google" ${canLogin ? "" : "disabled"}>${escape(loginLabel)}</button>
@@ -503,30 +542,30 @@ function renderLogin() {
           <button class="ghost" data-action="sync-ru">Atualizar RU</button>
         </div>
         <div class="toast ${state.authError ? "is-warning" : ""}" style="margin-top: 1rem;">
-          ${escape(state.authError || state.syncMessage || "O login acontece pelo Google via Supabase Auth. Os PDFs privados ficam no Storage da sua conta.")}
+          ${escape(state.authError || state.syncMessage || "O login acontece pelo Google via Supabase Auth. Grade horaria e carteirinha ficam no Storage privado da conta.")}
         </div>
         <div class="facts-grid" style="margin-top: 1.25rem;">
           <div class="fact"><strong>Conta online</strong><p>login com Google</p></div>
           <div class="fact"><strong>Do DA</strong><p>marca e entrada centralizadas no diretório</p></div>
-          <div class="fact"><strong>PDF privado</strong><p>guardado no bucket privado do aluno</p></div>
+          <div class="fact"><strong>Cadastro inicial</strong><p>grade horaria e carteirinha antes do primeiro uso</p></div>
         </div>
       </section>
 
       <aside class="preview-card">
         <span class="eyebrow">Identidade DAGV</span>
-        <h2 class="preview-title">Horários, RU e SCA reunidos em um painel do DA.</h2>
+        <h2 class="preview-title">Horarios, RU e ID estudantil reunidos em um painel do DA.</h2>
         <p class="preview-copy">
-          O aluno entra com Google, envia o PDF real do SCA e acompanha agenda, semana e RU em uma interface pensada para o diretório acadêmico.
+          O aluno entra com Google, conclui o cadastro com grade horaria e carteirinha em PDF e depois acompanha agenda, semana e RU em uma interface pensada para o diretório academico.
         </p>
         <div class="pill-grid">
           <div class="preview-pill"><strong>Painel do DA</strong><span>atalho direto para o portal estudantil</span></div>
-          <div class="preview-pill"><strong>PDF privado</strong><span>armazenado no Supabase Storage</span></div>
-          <div class="preview-pill"><strong>Agenda real</strong><span>horários e disciplinas saem do SCA</span></div>
+          <div class="preview-pill"><strong>ID digital</strong><span>abre o PDF salvo no menu lateral</span></div>
+          <div class="preview-pill"><strong>Agenda real</strong><span>horarios e disciplinas saem do SCA</span></div>
         </div>
         <div class="mini-stack">
           <div class="mini-card"><small>Passo 1</small><strong>Entrar</strong><span>use sua conta Google</span></div>
-          <div class="mini-card"><small>Passo 2</small><strong>Enviar PDF</strong><span>o arquivo fica salvo na conta</span></div>
-          <div class="mini-card"><small>Passo 3</small><strong>Acompanhar o dia</strong><span>aulas e RU sincronizam após a leitura</span></div>
+          <div class="mini-card"><small>Passo 2</small><strong>Concluir cadastro</strong><span>grade horaria e carteirinha ficam salvas na conta</span></div>
+          <div class="mini-card"><small>Passo 3</small><strong>Acompanhar o dia</strong><span>aulas e RU liberam apos a leitura</span></div>
         </div>
       </aside>
     </div>
@@ -552,12 +591,174 @@ function renderStartupFailure(error) {
   `;
 }
 
-function renderMainPanel(activeUpload) {
+function renderMainPanel(activeUpload, registration = getRegistrationState()) {
+  if (state.activeTab === REGISTRATION_TAB_ID) {
+    return renderRegistrationPanel(registration);
+  }
+
+  if (!registration.isComplete) {
+    return renderRegistrationPendingState(registration);
+  }
+
   if (state.activeTab === "academic") {
     return renderAcademicPanel(activeUpload);
   }
 
   return renderPortalTab(activeUpload);
+}
+
+function renderSidebar(registration) {
+  return `
+    <aside class="sidebar-panel ${state.sidebarOpen ? "is-open" : ""}" aria-label="Navegacao do app">
+      <section class="sidebar-profile">
+        <div class="sidebar-profile-main">
+          <div class="sidebar-avatar">${renderAvatar(state.user)}</div>
+          <div>
+            <strong>${escape(state.user.displayName || "Aluno")}</strong>
+            <span>Aluno</span>
+            <small>${escape(state.profile?.activeUploadName || state.user.email || state.user.uid)}</small>
+          </div>
+        </div>
+        <div class="sidebar-profile-note">${registration.isComplete ? "Cadastro concluido" : "Cadastro inicial pendente"}</div>
+      </section>
+
+      <nav class="sidebar-nav" aria-label="Menu lateral">
+        ${SIDEBAR_ITEMS.map((item) => renderSidebarItem(item, registration)).join("")}
+      </nav>
+
+      <div class="sidebar-footer">
+        <button class="sidebar-item sidebar-item-footer" data-action="logout">
+          <span class="sidebar-item-mark">SA</span>
+          <span>Sair</span>
+        </button>
+      </div>
+    </aside>
+  `;
+}
+
+function renderSidebarItem(item, registration) {
+  const isActive = item.id === state.activeTab || (state.activeTab === "academic" && item.tab === state.agendaTab);
+  const isLocked = !registration.isComplete && item.action !== "open-registration" && item.action !== "open-student-card";
+
+  return `
+    <button class="sidebar-item ${isActive ? "is-active" : ""} ${isLocked ? "is-locked" : ""}" data-action="${escapeAttribute(item.action)}" ${item.tab ? `data-tab="${escapeAttribute(item.tab)}"` : ""}>
+      <span class="sidebar-item-mark">${escape(item.mark)}</span>
+      <span>${escape(item.label)}</span>
+    </button>
+  `;
+}
+
+function renderRegistrationPanel(registration) {
+  const scheduleUploads = getScheduleUploads();
+  const studentCardUpload = registration.studentCardUpload;
+
+  return `
+    <section class="section-stack simple-stack">
+      <section class="paper-card dashboard-highlight onboarding-highlight">
+        <div class="section-topline">Cadastro inicial</div>
+        <h2 class="section-title">${registration.isComplete ? "Cadastro concluido" : "Envie os dois documentos antes do primeiro uso"}</h2>
+        <p class="section-copy">
+          ${registration.isComplete
+            ? "Sua grade horaria e sua carteirinha estudantil ja estao vinculadas a conta. Sempre que precisar, voce pode atualizar os arquivos aqui."
+            : "Para liberar o painel do DAGV, precisamos da grade horaria em PDF e da carteirinha estudantil em PDF. Ate la, o app fica em modo de espera com avisos simples."}
+        </p>
+        <div class="simple-meta-grid">
+          ${renderRegistrationStatusCard("Grade horaria", registration.scheduleUpload ? "Recebida" : "Aguardando PDF", registration.scheduleUpload ? getExtractionCaption(registration.scheduleUpload) : "Envie o PDF do SCA para montar sua agenda.")}
+          ${renderRegistrationStatusCard("Carteirinha estudantil", studentCardUpload ? "Recebida" : "Aguardando PDF", studentCardUpload ? "O item ID Digital do menu ja abre o PDF salvo." : "Pre-configurada para o PDF oficial que a UFTM disponibilizar.")}
+        </div>
+      </section>
+
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Cadastro</div>
+            <h2 class="section-title">Grade horaria</h2>
+          </div>
+          ${registration.scheduleUpload ? `<button class="ghost" data-action="open-academic-tab" data-tab="today">Abrir agenda</button>` : ""}
+        </div>
+        <p class="section-copy">Use o PDF oficial do SCA para preencher aulas, semana e disciplinas automaticamente.</p>
+        <div class="upload-drop registration-drop" style="margin-top: 1rem;">
+          <input id="schedulePdfInput" class="file-input" type="file" accept="application/pdf,.pdf" />
+          <div class="button-row">
+            <label class="file-trigger" for="schedulePdfInput">${registration.scheduleUpload ? "Atualizar grade horaria" : "Enviar grade horaria"}</label>
+          </div>
+          ${registration.scheduleUpload ? `
+            <div class="simple-meta-grid">
+              <div class="mini-card"><small>Arquivo ativo</small><strong>${escape(registration.scheduleUpload.originalName)}</strong><span>${escape(formatBytes(registration.scheduleUpload.size))}</span></div>
+              <div class="mini-card"><small>Status</small><strong>${escape(getUploadStatusLabel(registration.scheduleUpload))}</strong><span>${escape(getExtractionCaption(registration.scheduleUpload))}</span></div>
+            </div>
+          ` : `<div class="support-line" style="margin-top: 0.85rem;">Aguardando o primeiro PDF do SCA.</div>`}
+        </div>
+      </section>
+
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Cadastro</div>
+            <h2 class="section-title">Carteirinha estudantil</h2>
+          </div>
+          ${studentCardUpload ? `<button class="ghost" data-action="open-student-card">Abrir ID digital</button>` : ""}
+        </div>
+        <p class="section-copy">Deixe o PDF da carteirinha salvo na conta. O modelo oficial da UFTM pode ser trocado depois sem mudar o fluxo.</p>
+        <div class="upload-drop registration-drop" style="margin-top: 1rem;">
+          <input id="studentCardInput" class="file-input" type="file" accept="application/pdf,.pdf" />
+          <div class="button-row">
+            <label class="file-trigger" for="studentCardInput">${studentCardUpload ? "Atualizar carteirinha" : "Enviar carteirinha estudantil"}</label>
+          </div>
+          ${studentCardUpload ? `
+            <div class="simple-meta-grid">
+              <div class="mini-card"><small>ID digital</small><strong>${escape(studentCardUpload.originalName)}</strong><span>${escape(formatBytes(studentCardUpload.size))}</span></div>
+              <div class="mini-card"><small>Status</small><strong>Pronto</strong><span>Abre direto pelo menu lateral.</span></div>
+            </div>
+          ` : `<div class="support-line" style="margin-top: 0.85rem;">Aguardando o PDF da carteirinha para habilitar o item ID Digital.</div>`}
+        </div>
+      </section>
+
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Arquivos</div>
+            <h2 class="section-title">Documentos vinculados</h2>
+          </div>
+          <button class="ghost" data-action="refresh-uploads">Atualizar lista</button>
+        </div>
+        <div class="upload-list" style="margin-top: 1rem;">
+          ${scheduleUploads.length || studentCardUpload
+            ? [
+                ...scheduleUploads.map((item) => renderUploadItem(item, registration.scheduleUpload)),
+                ...getStudentCardUploads().map((item) => renderUploadItem(item, studentCardUpload)),
+              ].join("")
+            : `<div class="empty-state">Nenhum documento foi enviado ainda.</div>`}
+        </div>
+        ${renderUploadStatus()}
+      </section>
+    </section>
+  `;
+}
+
+function renderRegistrationStatusCard(title, status, caption) {
+  return `
+    <div class="mini-card registration-status-card">
+      <small>${escape(title)}</small>
+      <strong>${escape(status)}</strong>
+      <span>${escape(caption)}</span>
+    </div>
+  `;
+}
+
+function renderRegistrationPendingState(registration) {
+  return `
+    <section class="section-stack simple-stack">
+      <section class="paper-card dashboard-highlight onboarding-highlight">
+        <div class="section-topline">Cadastro pendente</div>
+        <h2 class="section-title">Aguardando finalizacao do cadastro</h2>
+        <p class="section-copy">${escape(buildRegistrationBannerMessage(registration))}</p>
+        <div class="button-row" style="margin-top: 1rem;">
+          <button class="secondary" data-action="open-registration">Ir para cadastro</button>
+        </div>
+      </section>
+    </section>
+  `;
 }
 
 function renderPortalTab(activeUpload) {
@@ -595,7 +796,7 @@ function renderPortalTab(activeUpload) {
           <h2 class="section-title">${escape(buildHeroTitle(activeUpload, academicData, todayClasses, nextClass))}</h2>
           <p class="section-copy">${escape(buildHeroSubtitle(academicData))}</p>
           <div class="button-row" style="margin-top: 1rem;">
-            <button class="secondary" data-action="open-academic-tab" data-tab="${academicData ? "today" : "sca"}">${academicData ? "Abrir agenda" : "Importar PDF"}</button>
+            <button class="secondary" data-action="${academicData ? "open-academic-tab" : "open-registration"}" ${academicData ? 'data-tab="today"' : ""}>${academicData ? "Abrir agenda" : "Finalizar cadastro"}</button>
             <button class="ghost" data-action="set-main-tab" data-tab="dagv">Portal do DAGV</button>
           </div>
         </section>
@@ -604,7 +805,7 @@ function renderPortalTab(activeUpload) {
           ${renderHomeShortcut("HJ", "Hoje", "open-academic-tab", "today")}
           ${renderHomeShortcut("RU", "RU", "open-academic-tab", "menu")}
           ${renderHomeShortcut("GR", "Semana", "open-academic-tab", "week")}
-          ${renderHomeShortcut("PDF", "SCA", "open-academic-tab", "sca")}
+          ${renderHomeShortcut("CA", "Cadastro", "open-registration", "")}
           ${renderHomeShortcut("DA", "DAGV", "set-main-tab", "dagv")}
           ${renderHomeShortcut("LK", "Links", "set-main-tab", "links")}
         </section>
@@ -736,67 +937,6 @@ function renderAcademicPanel(activeUpload) {
     `;
   }
 
-  if (state.agendaTab === "sca") {
-    return `
-      <section class="section-stack simple-stack">
-        ${renderAgendaHeader("SCA")}
-        <section class="paper-card simple-section">
-          <div class="section-header-row">
-            <div>
-              <div class="section-topline">Upload</div>
-              <h2 class="section-title">PDF do SCA</h2>
-            </div>
-            <button class="ghost" data-action="refresh-uploads">Atualizar lista</button>
-          </div>
-          <p class="section-copy">Envie o PDF oficial do aluno para preencher a agenda.</p>
-          <div class="upload-drop" style="margin-top: 1rem;">
-            <input id="pdfInput" class="file-input" type="file" accept="application/pdf,.pdf" />
-            <div class="button-row">
-              <label class="file-trigger" for="pdfInput">Selecionar PDF real</label>
-            </div>
-            ${activeUpload ? `
-              <div class="simple-meta-grid">
-                <div class="mini-card"><small>Arquivo ativo</small><strong>${escape(activeUpload.originalName)}</strong><span>${escape(formatBytes(activeUpload.size))}</span></div>
-                <div class="mini-card"><small>Status</small><strong>${escape(getUploadStatusLabel(activeUpload))}</strong><span>${escape(getExtractionCaption(activeUpload))}</span></div>
-              </div>
-            ` : ""}
-          </div>
-          ${renderUploadStatus()}
-        </section>
-
-        ${activeUpload ? `
-          <section class="paper-card simple-section">
-            <div class="section-header-row">
-              <div>
-                <div class="section-topline">Resumo</div>
-                <h2 class="section-title">${escape(academicData?.profile?.studentName || state.user.displayName || "Aluno")}</h2>
-              </div>
-              <button class="ghost" data-action="open-upload" data-upload-id="${escapeAttribute(activeUpload.id)}">Abrir PDF</button>
-            </div>
-            <div class="simple-meta-grid">
-              <div class="mini-card"><small>Matrícula</small><strong>${escape(academicData?.profile?.studentId || "não encontrada")}</strong><span>${escape(academicData?.profile?.period || "período não encontrado")}</span></div>
-              <div class="mini-card"><small>Curso</small><strong>${escape(academicData?.profile?.course || "não encontrado")}</strong><span>${String(disciplines.length)} disciplinas</span></div>
-              <div class="mini-card"><small>Horários</small><strong>${String(schedule.length)}</strong><span>blocos importados</span></div>
-              <div class="mini-card"><small>PDFs</small><strong>${String(state.uploads.length)}</strong><span>arquivos na conta</span></div>
-            </div>
-          </section>
-        ` : ""}
-
-        <section class="paper-card simple-section">
-          <div class="section-header-row">
-            <div>
-              <div class="section-topline">Arquivos</div>
-              <h2 class="section-title">PDFs salvos</h2>
-            </div>
-          </div>
-          <div class="upload-list" style="margin-top: 1rem;">
-            ${state.uploads.length ? state.uploads.map((item) => renderUploadItem(item, activeUpload)).join("") : `<div class="empty-state">Nenhum PDF enviado ainda.</div>`}
-          </div>
-        </section>
-      </section>
-    `;
-  }
-
   return `
     <section class="section-stack simple-stack">
       ${renderAgendaHeader("Hoje")}
@@ -838,6 +978,9 @@ function renderAgendaHeader(title) {
     <section class="paper-card agenda-shell simple-section">
       <div class="section-topline">Acadêmico</div>
       <h2 class="section-title">${escape(title)}</h2>
+      <div class="button-row" style="margin-top: 0.75rem;">
+        <button class="ghost" data-action="open-registration">Cadastro</button>
+      </div>
       <div class="segmented-control" style="margin-top: 1rem;">
         ${AGENDA_NAV_ITEMS.map(renderAgendaTabButton).join("")}
       </div>
@@ -867,17 +1010,22 @@ function renderUploadStatus() {
 
 function renderUploadItem(item, activeUpload) {
   const isActive = activeUpload && activeUpload.id === item.id;
+  const isStudentCard = item.documentType === DOCUMENT_TYPES.studentCard;
   return `
     <article class="upload-entry ${isActive ? "is-active" : ""}">
       <div class="upload-entry-top">
         <div>
           <h3 class="schedule-title">${escape(item.originalName)}</h3>
-          <div class="support-line">${escape(formatShortDateTime(item.uploadedAtClient))} • ${escape(formatBytes(item.size))}</div>
+          <div class="support-line">${escape(isStudentCard ? "Carteirinha estudantil" : "Grade horaria")} • ${escape(formatShortDateTime(item.uploadedAtClient))} • ${escape(formatBytes(item.size))}</div>
         </div>
         <span class="tag">${escape(getUploadStatusLabel(item))}</span>
       </div>
       <div class="button-row" style="margin-top: 0.75rem;">
-        ${isActive ? `<span class="tag">PDF ativo</span>` : `<button class="ghost" data-action="set-active-upload" data-upload-id="${escapeAttribute(item.id)}">Definir ativo</button>`}
+        ${isStudentCard
+          ? `<span class="tag">ID digital</span>`
+          : isActive
+            ? `<span class="tag">Grade ativa</span>`
+            : `<button class="ghost" data-action="set-active-upload" data-upload-id="${escapeAttribute(item.id)}">Definir ativa</button>`}
         <button class="ghost" data-action="open-upload" data-upload-id="${escapeAttribute(item.id)}">${state.openingUploadId === item.id ? "Abrindo..." : "Abrir"}</button>
       </div>
     </article>
@@ -952,6 +1100,7 @@ function renderPortalBlock(block) {
 function renderNewsCard(item) {
   return `
     <article class="paper-card news-card simple-section">
+      ${item.image ? `<img class="portal-image" src="${escapeAttribute(item.image)}" alt="${escapeAttribute(item.title || "Imagem da notícia")}" />` : ""}
       <div class="section-topline">${escape(item.sourceLabel || "Atualização")}</div>
       <h3 class="schedule-title">${escape(item.title || "Notícia")}</h3>
       <p class="section-copy">${escape(item.summary || "Sem resumo disponível.")}</p>
@@ -1000,12 +1149,15 @@ function metric(label, value, caption) {
 }
 
 function getScreenTitle() {
+  if (state.activeTab === REGISTRATION_TAB_ID) {
+    return "Cadastro";
+  }
+
   if (state.activeTab === "academic") {
     const agendaTitleMap = {
       today: "Grade Horária",
       week: "Semana",
       menu: "RU",
-      sca: "PDF do SCA",
     };
     return agendaTitleMap[state.agendaTab] || "Acadêmico";
   }
@@ -1023,18 +1175,28 @@ function getScreenTitle() {
   return mainTitleMap[state.activeTab] || APP_NAME;
 }
 
-function renderStatusBanner() {
-  const message = state.uploadError || state.authError || (state.uploadProgress > 0 ? state.uploadMessage : "");
+function renderStatusBanner(registration = getRegistrationState()) {
+  const message = state.uploadError
+    || state.authError
+    || (!registration.isComplete ? buildRegistrationBannerMessage(registration) : "")
+    || (state.uploadProgress > 0 ? state.uploadMessage : "");
   if (!message) {
     return "";
   }
 
-  return `<div class="toast ${state.uploadError || state.authError ? "is-danger" : ""} compact-toast">${escape(message)}</div>`;
+  const classes = ["toast", "compact-toast"];
+  if (state.uploadError || state.authError) {
+    classes.push("is-danger");
+  } else if (!registration.isComplete) {
+    classes.push("is-warning");
+  }
+
+  return `<div class="${classes.join(" ")}">${escape(message)}</div>`;
 }
 
 function renderHomeShortcut(mark, label, action, tab) {
   return `
-    <button class="quick-button" data-action="${escapeAttribute(action)}" data-tab="${escapeAttribute(tab)}">
+    <button class="quick-button" data-action="${escapeAttribute(action)}" ${tab ? `data-tab="${escapeAttribute(tab)}"` : ""}>
       <span class="quick-button-mark">${escape(mark)}</span>
       <span class="quick-button-label">${escape(label)}</span>
     </button>
@@ -1050,15 +1212,97 @@ function renderSimpleInfoRow(label, value) {
   `;
 }
 
+function getScheduleUploads() {
+  return state.uploads.filter((item) => item.documentType !== DOCUMENT_TYPES.studentCard);
+}
+
+function getStudentCardUploads() {
+  return state.uploads.filter((item) => item.documentType === DOCUMENT_TYPES.studentCard);
+}
+
+function getRegistrationState() {
+  const scheduleUploads = getScheduleUploads();
+  const studentCardUploads = getStudentCardUploads();
+  const scheduleUpload = getActiveUpload();
+  const studentCardUpload = studentCardUploads[0] || null;
+  const missing = [];
+
+  if (!scheduleUpload) {
+    missing.push("grade horaria");
+  }
+
+  if (!studentCardUpload) {
+    missing.push("carteirinha estudantil");
+  }
+
+  return {
+    scheduleUpload,
+    studentCardUpload,
+    missing,
+    isComplete: !missing.length,
+    scheduleUploads,
+    studentCardUploads,
+  };
+}
+
+function buildRegistrationBannerMessage(registration = getRegistrationState()) {
+  if (registration.isComplete) {
+    return "";
+  }
+
+  return `Aguardando finalizacao do cadastro: envie ${registration.missing.join(" e ")} antes da primeira utilizacao.`;
+}
+
+function ensureAccessAfterRegistration(action) {
+  const registration = getRegistrationState();
+  if (registration.isComplete) {
+    return true;
+  }
+
+  const message = buildRegistrationBannerMessage(registration);
+  setState({
+    activeTab: REGISTRATION_TAB_ID,
+    sidebarOpen: false,
+    uploadError: "",
+    uploadMessage: message || PENDING_REGISTRATION_MESSAGE,
+  });
+
+  return false;
+}
+
 async function onClick(event) {
   const button = event.target.closest("[data-action]");
   if (!button) return;
 
   const action = button.dataset.action;
 
+  if (action === "toggle-sidebar") {
+    setState({ sidebarOpen: !state.sidebarOpen });
+    return;
+  }
+
+  if (action === "close-sidebar") {
+    setState({ sidebarOpen: false });
+    return;
+  }
+
+  if (action === "open-registration") {
+    setState({
+      activeTab: REGISTRATION_TAB_ID,
+      sidebarOpen: false,
+    });
+    return;
+  }
+
   if (action === "set-main-tab") {
     const nextTab = button.dataset.tab || "home";
-    setState({ activeTab: nextTab });
+    if (!ensureAccessAfterRegistration(action)) {
+      return;
+    }
+    setState({
+      activeTab: nextTab,
+      sidebarOpen: false,
+    });
     if (PORTAL_TABS.has(nextTab)) {
       loadPortalTab(nextTab, true);
     }
@@ -1066,17 +1310,25 @@ async function onClick(event) {
   }
 
   if (action === "set-agenda-tab") {
+    if (!ensureAccessAfterRegistration(action)) {
+      return;
+    }
     setState({
       activeTab: "academic",
       agendaTab: button.dataset.tab || "today",
+      sidebarOpen: false,
     });
     return;
   }
 
   if (action === "open-academic-tab") {
+    if (!ensureAccessAfterRegistration(action)) {
+      return;
+    }
     setState({
       activeTab: "academic",
       agendaTab: button.dataset.tab || "today",
+      sidebarOpen: false,
     });
     return;
   }
@@ -1103,6 +1355,23 @@ async function onClick(event) {
 
   if (action === "logout") {
     logout();
+    return;
+  }
+
+  if (action === "open-student-card") {
+    const studentCardUpload = getRegistrationState().studentCardUpload;
+    if (!studentCardUpload) {
+      setState({
+        activeTab: REGISTRATION_TAB_ID,
+        sidebarOpen: false,
+        uploadError: "",
+        uploadMessage: "A carteirinha digital ainda aguarda o PDF oficial do aluno.",
+      });
+      return;
+    }
+
+    setState({ sidebarOpen: false });
+    openUpload(studentCardUpload.id);
     return;
   }
 
@@ -1133,8 +1402,13 @@ function onChange(event) {
     return;
   }
 
-  if (event.target.id === "pdfInput" && event.target.files && event.target.files[0]) {
-    uploadPdf(event.target.files[0], event.target);
+  if (event.target.id === "schedulePdfInput" && event.target.files && event.target.files[0]) {
+    uploadDocument(event.target.files[0], event.target, DOCUMENT_TYPES.schedule);
+    return;
+  }
+
+  if (event.target.id === "studentCardInput" && event.target.files && event.target.files[0]) {
+    uploadDocument(event.target.files[0], event.target, DOCUMENT_TYPES.studentCard);
   }
 }
 
@@ -1156,6 +1430,7 @@ async function logout() {
       openingUploadId: "",
       activeTab: "home",
       agendaTab: "today",
+      sidebarOpen: false,
       syncMessage: "Sessão encerrada. Entre novamente para acessar seus PDFs.",
     });
   } catch (error) {
@@ -1224,24 +1499,33 @@ async function refreshRemoteUploads() {
 
   setState({
     uploadError: "",
-    uploadMessage: "Atualizando a lista de PDFs da conta...",
+    uploadMessage: "Atualizando os documentos da conta...",
   });
 
   try {
     await reloadRemoteAccountData(state.user.uid);
     setState({
       uploadError: "",
-      uploadMessage: "Lista de PDFs atualizada com sucesso.",
+      uploadMessage: "Lista de documentos atualizada com sucesso.",
     });
   } catch (error) {
     setState({
-      uploadError: `Não consegui atualizar a lista de PDFs: ${describeSupabaseError(error)}`,
+      uploadError: `Não consegui atualizar a lista de documentos: ${describeSupabaseError(error)}`,
       uploadMessage: "",
     });
   }
 }
 
-async function uploadPdf(file, inputElement) {
+async function uploadDocument(file, inputElement, documentType) {
+  if (documentType === DOCUMENT_TYPES.studentCard) {
+    await uploadStudentCardDocument(file, inputElement);
+    return;
+  }
+
+  await uploadScheduleDocument(file, inputElement);
+}
+
+async function uploadScheduleDocument(file, inputElement) {
   if (!state.user || !services.supabase) {
     setState({ uploadError: "Entre com Google antes de enviar o PDF.", uploadMessage: "", uploadProgress: 0 });
     inputElement.value = "";
@@ -1249,7 +1533,7 @@ async function uploadPdf(file, inputElement) {
   }
 
   if (!isPdfFile(file)) {
-    setState({ uploadError: "Selecione um arquivo PDF válido do SCA.", uploadMessage: "", uploadProgress: 0 });
+    setState({ uploadError: "Selecione um arquivo PDF valido do SCA.", uploadMessage: "", uploadProgress: 0 });
     inputElement.value = "";
     return;
   }
@@ -1259,15 +1543,14 @@ async function uploadPdf(file, inputElement) {
     : createUploadId();
   const uploadedAtClient = new Date().toISOString();
   const normalizedName = normalizeFileName(file.name);
-  const storagePath = `${state.user.uid}/${uploadId}/${normalizedName}`;
+  const storagePath = `${state.user.uid}/schedule/${uploadId}/${normalizedName}`;
   const bucketName = getSupabaseBucketName();
 
   setState({
     uploadError: "",
     uploadMessage: `Lendo ${file.name}...`,
     uploadProgress: 8,
-    activeTab: "academic",
-    agendaTab: "sca",
+    activeTab: REGISTRATION_TAB_ID,
   });
 
   try {
@@ -1353,8 +1636,8 @@ async function uploadPdf(file, inputElement) {
       setState({
         uploadProgress: 100,
         uploadMessage: hasAcademicData
-          ? "PDF importado e sincronizado com sucesso na conta do aluno."
-          : "PDF enviado para a conta, mas com reconhecimento parcial dos dados acadêmicos.",
+          ? "Grade horaria importada e sincronizada com sucesso."
+          : "Grade horaria enviada para a conta, mas com reconhecimento parcial dos dados academicos.",
         uploadError: "",
         referenceDate: suggestReferenceDate(academicData.schedule, state.referenceDate),
       });
@@ -1385,6 +1668,95 @@ async function uploadPdf(file, inputElement) {
       uploadProgress: 0,
       uploadMessage: "",
       uploadError: `Não consegui importar este PDF do SCA: ${describeSupabaseError(error)}`,
+    });
+  } finally {
+    inputElement.value = "";
+  }
+}
+
+async function uploadStudentCardDocument(file, inputElement) {
+  if (!state.user || !services.supabase) {
+    setState({ uploadError: "Entre com Google antes de enviar a carteirinha.", uploadMessage: "", uploadProgress: 0 });
+    inputElement.value = "";
+    return;
+  }
+
+  if (!isPdfFile(file)) {
+    setState({ uploadError: "Selecione um arquivo PDF valido para a carteirinha estudantil.", uploadMessage: "", uploadProgress: 0 });
+    inputElement.value = "";
+    return;
+  }
+
+  const uploadId = (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function")
+    ? crypto.randomUUID()
+    : createUploadId();
+  const uploadedAtClient = new Date().toISOString();
+  const normalizedName = normalizeFileName(file.name);
+  const storagePath = `${state.user.uid}/student-card/${uploadId}/${normalizedName}`;
+  const bucketName = getSupabaseBucketName();
+
+  setState({
+    uploadError: "",
+    uploadMessage: `Enviando ${file.name} como carteirinha estudantil...`,
+    uploadProgress: 24,
+    activeTab: REGISTRATION_TAB_ID,
+  });
+
+  try {
+    await upsertUploadRow({
+      id: uploadId,
+      ownerUid: state.user.uid,
+      originalName: file.name,
+      normalizedName,
+      storagePath,
+      size: file.size,
+      contentType: file.type || "application/pdf",
+      status: "uploading",
+      parserStatus: "student_card_pending",
+      uploadedAtClient,
+      notes: "Carteirinha estudantil aguardando envio completo para o Storage.",
+      academicData: null,
+    });
+
+    const { error: storageError } = await services.supabase
+      .storage
+      .from(bucketName)
+      .upload(storagePath, file, {
+        contentType: file.type || "application/pdf",
+        upsert: false,
+      });
+
+    if (storageError) {
+      throw storageError;
+    }
+
+    await upsertUploadRow({
+      id: uploadId,
+      ownerUid: state.user.uid,
+      originalName: file.name,
+      normalizedName,
+      storagePath,
+      size: file.size,
+      contentType: file.type || "application/pdf",
+      status: "uploaded",
+      parserStatus: "student_card_ready",
+      uploadedAtClient,
+      notes: "Carteirinha estudantil salva e pronta para abrir pelo menu lateral.",
+      academicData: null,
+    });
+
+    await reloadRemoteAccountData(state.user.uid);
+
+    setState({
+      uploadProgress: 100,
+      uploadMessage: "Carteirinha estudantil vinculada com sucesso. O item ID Digital ja pode abrir o PDF.",
+      uploadError: "",
+    });
+  } catch (error) {
+    setState({
+      uploadProgress: 0,
+      uploadMessage: "",
+      uploadError: `Nao consegui vincular a carteirinha estudantil: ${describeSupabaseError(error)}`,
     });
   } finally {
     inputElement.value = "";
@@ -1470,7 +1842,7 @@ async function loadPortalTab(tab, silent = false) {
 async function setActiveUpload(uploadId) {
   if (!state.user || !uploadId || !services.supabase) return;
 
-  const upload = state.uploads.find((item) => item.id === uploadId);
+  const upload = getScheduleUploads().find((item) => item.id === uploadId);
   if (!upload) return;
 
   try {
@@ -1591,9 +1963,10 @@ function buildHeroSubtitle(academicData) {
 }
 
 function getActiveUpload() {
-  if (!state.uploads.length) return null;
+  const scheduleUploads = getScheduleUploads();
+  if (!scheduleUploads.length) return null;
   const activeId = state.profile?.activeUploadId || "";
-  return state.uploads.find((item) => item.id === activeId) || state.uploads[0] || null;
+  return scheduleUploads.find((item) => item.id === activeId) || scheduleUploads[0] || null;
 }
 
 function getAcademicData(upload) {
@@ -1615,6 +1988,11 @@ function getExtractionCaption(upload) {
 
 function getUploadStatusLabel(upload) {
   if (!upload) return "Sem arquivo";
+  if (upload.documentType === DOCUMENT_TYPES.studentCard) {
+    if (upload.status === "uploading") return "Enviando";
+    if (upload.status === "error") return "Falhou";
+    return "Pronto";
+  }
   if (upload.status === "processed") return "Importado";
   if (upload.status === "limited") return "Importado parcialmente";
   if (upload.status === "uploading") return "Enviando";
@@ -1689,7 +2067,7 @@ function renderMissingPdfState(message) {
     <div class="empty-state">
       ${escape(message)}
       <div class="button-row" style="margin-top: 0.75rem;">
-        <button class="ghost" data-action="open-academic-tab" data-tab="sca">Abrir SCA</button>
+        <button class="ghost" data-action="open-registration">Abrir cadastro</button>
       </div>
     </div>
   `;
@@ -1823,6 +2201,7 @@ function persistUiState() {
     JSON.stringify({
       activeTab: state.activeTab,
       agendaTab: state.agendaTab,
+      sidebarOpen: state.sidebarOpen,
       referenceDate: state.referenceDate,
       menu: state.menu,
       lastMenuSync: state.lastMenuSync,

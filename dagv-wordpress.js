@@ -144,6 +144,7 @@ async function fetchLatestNews(limit = 5) {
         link: page.url,
         publishedAt: page.publishedAt || "",
         summary: page.summary || buildSummary(page.blocks || []),
+        image: page.image || "",
         sourceLabel: page.sourceLabel || "DAGV",
       }))
       .filter((item) => item.title && item.summary)
@@ -171,12 +172,14 @@ function parseFeedItem(xml) {
   const publishedAt = decodeHtml(stripTags(extractTag(xml, "pubDate")));
   const description = extractTag(xml, "description") || extractCdata(xml, "content:encoded");
   const summary = buildExcerpt(decodeHtml(stripTags(description)));
+  const image = extractFirstImage(description);
 
   return {
     title,
     link,
     publishedAt,
     summary,
+    image,
   };
 }
 
@@ -197,8 +200,17 @@ function extractPublishedAt(html) {
 }
 
 function extractFirstImage(html) {
-  const src = firstMatch(html, /<img[^>]+src="([^"]+)"/i);
-  return src ? decodeHtml(src) : "";
+  const raw = firstMatch(html, /<img[^>]+(?:src|data-src|data-lazy-src)="([^"]+)"/i)
+    || firstMatch(html, /<img[^>]+srcset="([^"]+)"/i);
+  if (!raw) {
+    return "";
+  }
+
+  const candidate = String(raw).includes(",")
+    ? String(raw).split(",")[0].trim().split(/\s+/)[0]
+    : String(raw).trim();
+
+  return normalizeAbsoluteUrl(decodeHtml(candidate));
 }
 
 function extractBlocks(contentHtml) {
@@ -327,6 +339,27 @@ function decodeHtml(value) {
     .replace(/&mdash;/g, "-")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">"));
+}
+
+function normalizeAbsoluteUrl(value) {
+  const input = String(value || "").trim();
+  if (!input) {
+    return "";
+  }
+
+  if (input.startsWith("//")) {
+    return `https:${input}`;
+  }
+
+  if (/^https?:\/\//i.test(input)) {
+    return input;
+  }
+
+  if (input.startsWith("/")) {
+    return `${BASE_URL}${input}`;
+  }
+
+  return `${BASE_URL}/${input.replace(/^\.?\//, "")}`;
 }
 
 function escapeRegex(value) {
