@@ -1622,10 +1622,14 @@ body {
     margin-bottom: 0;
   }
 
-  .document-viewer-shell.is-student-card-viewer .document-viewer-frame {
+  .document-viewer-shell.is-student-card-viewer .document-viewer-stage.is-student-card-stage {
     min-height: calc(100dvh - 7rem);
-    border-radius: 1rem;
     border-color: rgba(255, 255, 255, 0.08);
+    border-radius: 1rem;
+  }
+
+  .document-viewer-shell.is-student-card-viewer .document-viewer-frame.is-student-card-frame {
+    min-height: calc((100dvh - 7rem) * 2);
   }
 }
 
@@ -1841,8 +1845,23 @@ body {
   background: #f5f5f5;
 }
 
-.document-viewer-frame.is-student-card-frame {
+.document-viewer-stage.is-student-card-stage {
+  position: relative;
+  overflow: hidden;
+  min-height: 72vh;
+  border: 1px solid rgba(122, 31, 36, 0.08);
+  border-radius: 1.2rem;
   background: #000;
+}
+
+.document-viewer-frame.is-student-card-frame {
+  width: 200%;
+  min-height: 144vh;
+  border: 0;
+  border-radius: 0;
+  background: #000;
+  transform: scale(0.5);
+  transform-origin: top left;
 }
 
 .login-hero-shell {
@@ -2047,8 +2066,12 @@ body {
       max(0.65rem, env(safe-area-inset-left));
   }
 
-  .document-viewer-shell.is-student-card-viewer .document-viewer-frame {
+  .document-viewer-shell.is-student-card-viewer .document-viewer-stage.is-student-card-stage {
     min-height: calc(100dvh - 4.75rem);
+  }
+
+  .document-viewer-shell.is-student-card-viewer .document-viewer-frame.is-student-card-frame {
+    min-height: calc((100dvh - 4.75rem) * 2);
   }
 }
 

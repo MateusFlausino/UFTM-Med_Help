@@ -714,7 +714,9 @@ function renderDocumentViewer() {
         ${viewer.loading
           ? `<div class="empty-state" style="margin-top: 1rem;">${viewer.documentType === DOCUMENT_TYPES.studentCard ? "Carregando o ID digital dentro do app..." : "Carregando o documento dentro do app..."}</div>`
           : frameSrc
-            ? `<iframe class="document-viewer-frame ${isStudentCardViewer ? "is-student-card-frame" : ""}" src="${escapeAttribute(frameSrc)}" title="${escapeAttribute(title)}" referrerpolicy="no-referrer"></iframe>`
+            ? isStudentCardViewer
+              ? `<div class="document-viewer-stage is-student-card-stage"><iframe class="document-viewer-frame is-student-card-frame" src="${escapeAttribute(frameSrc)}" title="${escapeAttribute(title)}" referrerpolicy="no-referrer"></iframe></div>`
+              : `<iframe class="document-viewer-frame" src="${escapeAttribute(frameSrc)}" title="${escapeAttribute(title)}" referrerpolicy="no-referrer"></iframe>`
             : `<div class="empty-state" style="margin-top: 1rem;">Nao consegui preparar este documento agora.</div>`}
       </section>
     </section>
