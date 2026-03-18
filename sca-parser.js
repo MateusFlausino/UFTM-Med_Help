@@ -456,10 +456,19 @@ function extractDisciplines(fullText) {
 }
 
 function extractSchedule(fullText) {
-  const normalizedText = normalizeSpacing(fullText).replace(
-    /Universidade Federal do Tri[aâ]ngulo Mineiro.+?P[aá]gina\s+\d+\/\d+/gi,
-    " "
-  );
+  const normalizedText = stripScheduleChrome(normalizeSpacing(fullText));
+  const entries = extractScheduleByDaySections(normalizedText);
+  const fallbackEntries = entries.length ? entries : extractScheduleByDisciplineSections(normalizedText);
+
+  return uniqueBy(fallbackEntries, (item) => item.id).sort((left, right) => {
+    if (left.weekday !== right.weekday) {
+      return left.weekday - right.weekday;
+    }
+    return left.startTime.localeCompare(right.startTime);
+  });
+}
+
+function extractScheduleByDaySections(normalizedText) {
   const sections = {};
   const sectionPattern = /Dia da Semana:\s*(Segunda|Terça|Terca|Quarta|Quinta|Sexta)\s+Per[ií]odo\s+Turma\s+Disciplina\s+Hor[aá]rio\s+Docente\s+(.+?)(?=Dia da Semana:\s*(?:Segunda|Terça|Terca|Quarta|Quinta|Sexta)\s+Per[ií]odo\s+Turma\s+Disciplina\s+Hor[aá]rio\s+Docente|$)/gi;
 
@@ -480,36 +489,93 @@ function extractSchedule(fullText) {
 
     const pattern = /(\d{2}\/\d{2}\/\d{4}(?:\s*-\s*\d{2}\/\d{2}\/\d{4})?)\s+([A-Z]{1,3}\d{1,2})\s+(.+?)\s+(\d{2}:\d{2}\s*-\s*\d{2}:\d{2})\s+([A-ZÀ-ÚÇÃÕ.\- ]+?)(?=(?:\d{2}\/\d{2}\/\d{4}(?:\s*-\s*\d{2}\/\d{2}\/\d{4})?\s+[A-Z]{1,3}\d{1,2})|$)/g;
     for (const match of joined.matchAll(pattern)) {
-      const dateRange = match[1];
-      const group = match[2];
-      const title = cleanTitle(match[3]);
-      const time = normalizeSpacing(match[4]);
-      const teacher = cleanPersonName(match[5] || "");
-      const [startDate, endDate] = splitDateRange(dateRange);
-      const [startTime, endTime] = time.split(/\s*-\s*/);
-
-      entries.push({
-        id: [dayKey, group, title, startDate, startTime].join("-"),
-        day: DAY_LABELS[dayKey],
-        weekday: DAY_TO_WEEKDAY[dayKey],
-        startDate,
-        endDate,
-        group,
-        title,
-        startTime,
-        endTime,
-        teacher,
-        type: inferClassType(group),
+      const entry = buildScheduleEntry({
+        dayKey,
+        dateRange: match[1],
+        group: match[2],
+        title: cleanTitle(match[3]),
+        time: normalizeSpacing(match[4]),
+        teacher: cleanPersonName(match[5] || ""),
       });
+
+      if (entry) {
+        entries.push(entry);
+      }
     }
   }
 
-  return uniqueBy(entries, (item) => item.id).sort((left, right) => {
-    if (left.weekday !== right.weekday) {
-      return left.weekday - right.weekday;
+  return entries;
+}
+
+function extractScheduleByDisciplineSections(normalizedText) {
+  const entries = [];
+  const sectionPattern = /Disciplina:\s*(.+?)\s+Per[ií]odo\s+Turma\s+Dia da Semana\s+Hor[aá]rio\s+Docente\s+(.+?)(?=Disciplina:\s*.+?\s+Per[ií]odo\s+Turma\s+Dia da Semana\s+Hor[aá]rio\s+Docente|$)/gi;
+  const entryPattern = /(\d{2}\/\d{2}\/\d{4}(?:\s*-\s*\d{2}\/\d{2}\/\d{4})?)\s+([A-Z]{1,3}\d{1,2})\s+(Segunda|Terça|Terca|Quarta|Quinta|Sexta)\s+(\d{2}:\d{2}\s*-\s*\d{2}:\d{2})\s+(.+?)(?=(?:\d{2}\/\d{2}\/\d{4}(?:\s*-\s*\d{2}\/\d{2}\/\d{4})?\s+[A-Z]{1,3}\d{1,2}\s+(?:Segunda|Terça|Terca|Quarta|Quinta|Sexta)\s+\d{2}:\d{2}\s*-\s*\d{2}:\d{2})|$)/g;
+
+  for (const match of normalizedText.matchAll(sectionPattern)) {
+    const title = cleanTitle(match[1] || "");
+    const body = normalizeSpacing(match[2] || "");
+    if (!title || !body) {
+      continue;
     }
-    return left.startTime.localeCompare(right.startTime);
-  });
+
+    for (const entryMatch of body.matchAll(entryPattern)) {
+      const dayKey = toDayKey(entryMatch[3]);
+      const entry = buildScheduleEntry({
+        dayKey,
+        dateRange: entryMatch[1],
+        group: entryMatch[2],
+        title,
+        time: normalizeSpacing(entryMatch[4]),
+        teacher: cleanPersonName(entryMatch[5] || ""),
+      });
+
+      if (entry) {
+        entries.push(entry);
+      }
+    }
+  }
+
+  return entries;
+}
+
+function buildScheduleEntry({ dayKey, dateRange, group, title, time, teacher }) {
+  if (!dayKey || !dateRange || !group || !title || !time) {
+    return null;
+  }
+
+  const [startDate, endDate] = splitDateRange(dateRange);
+  const [startTime, endTime] = String(time).split(/\s*-\s*/);
+  if (!startDate || !endDate || !startTime || !endTime) {
+    return null;
+  }
+
+  return {
+    id: [dayKey, group, title, startDate, startTime].join("-"),
+    day: DAY_LABELS[dayKey],
+    weekday: DAY_TO_WEEKDAY[dayKey],
+    startDate,
+    endDate,
+    group,
+    title,
+    startTime,
+    endTime,
+    teacher,
+    type: inferClassType(group),
+  };
+}
+
+function stripScheduleChrome(text) {
+  return normalizeSpacing(
+    String(text || "")
+      .replace(/Universidade Federal do Tri[aâ]ngulo Mineiro\s+\d{1,2}\/\d{1,2}\/\d{4}\s+\d{2}:\d{2}:\d{2}/gi, " ")
+      .replace(/PROENS\s*-\s*Pr[oó]-Reitoria de Ensino/gi, " ")
+      .replace(/DRCA\s*-\s*Departamento de Registro e Controle Acad[eê]mico/gi, " ")
+      .replace(/Rela[çc][aã]o de Disciplinas por Acad[eê]mico/gi, " ")
+      .replace(/\d{4}\/\d{2}\s*-\s*[A-ZÀ-ÚÇÃÕ0-9\s]+\([^)]+\)\s+Per[ií]odo Letivo:\s*\d{4}\s*-\s*\d+/gi, " ")
+      .replace(/Acad[eê]mico\s*:\s*[0-9.\-/]+\s*-\s*[^]+?(?=(?:Disciplina:)|(?:Dia da Semana:)|$)/gi, " ")
+      .replace(/P[aá]gina\s+\d+\/\d+/gi, " ")
+  );
 }
 
 function splitBeforeWeekSchedule(text) {
