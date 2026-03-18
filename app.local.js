@@ -161,6 +161,7 @@ let state = {
 appElement.addEventListener("click", onClick);
 appElement.addEventListener("change", onChange);
 appElement.addEventListener("input", onInput);
+appElement.addEventListener("load", onLoad, true);
 
 init().catch((error) => {
   appElement.innerHTML = renderStartupFailure(error);
@@ -566,11 +567,13 @@ function stopUserSubscriptions() {
 function render() {
   if (!state.user) {
     appElement.innerHTML = renderLogin();
+    syncStudentCardStageRatio();
     return;
   }
 
   if (state.activeTab === DOCUMENT_VIEWER_TAB_ID && state.documentViewer?.documentType === DOCUMENT_TYPES.studentCard) {
     appElement.innerHTML = renderStudentCardScreen();
+    syncStudentCardStageRatio();
     return;
   }
 
@@ -618,6 +621,37 @@ function render() {
       </div>
     </div>
   `;
+  syncStudentCardStageRatio();
+}
+
+function onLoad(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLImageElement) || !target.classList.contains("student-card-image")) {
+    return;
+  }
+
+  applyStudentCardStageRatio(target);
+}
+
+function syncStudentCardStageRatio() {
+  const image = appElement.querySelector(".student-card-image");
+  if (!(image instanceof HTMLImageElement) || !image.complete) {
+    return;
+  }
+
+  applyStudentCardStageRatio(image);
+}
+
+function applyStudentCardStageRatio(image) {
+  const stage = image.closest(".document-viewer-stage.is-student-card-stage");
+  const naturalWidth = Number(image.naturalWidth || 0);
+  const naturalHeight = Number(image.naturalHeight || 0);
+
+  if (!(stage instanceof HTMLElement) || !naturalWidth || !naturalHeight) {
+    return;
+  }
+
+  stage.style.setProperty("--student-card-stage-ratio", String(naturalWidth / naturalHeight));
 }
 
 function renderLogin() {

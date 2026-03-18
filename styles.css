@@ -1851,7 +1851,7 @@ body {
 }
 
 .student-card-screen .document-viewer-stage.is-student-card-stage {
-  width: min(92%, 68rem, calc((100dvh - 5.5rem) * 1.8));
+  width: min(92%, 68rem, calc((100dvh - 5.5rem) * var(--student-card-stage-ratio, 1.8)));
   height: auto;
   min-height: 0;
   max-height: calc((100dvh - 5.5rem) * 0.9);
@@ -1887,7 +1887,7 @@ body {
   position: relative;
   overflow: hidden;
   width: 100%;
-  aspect-ratio: 2 / 1;
+  aspect-ratio: var(--student-card-stage-ratio, 1.8) / 1;
   height: auto;
   min-height: 0;
   max-height: 72vh;
@@ -1897,6 +1897,7 @@ body {
   border: 1px solid rgba(122, 31, 36, 0.08);
   border-radius: 1.2rem;
   background: #000;
+  --student-card-stage-ratio: 1.8;
 }
 
 .student-card-image {
@@ -2111,7 +2112,7 @@ body {
   }
 
   .student-card-screen .document-viewer-stage.is-student-card-stage {
-    width: min(94%, 72rem, calc((100dvh - 4.75rem) * 1.95));
+    width: min(94%, 72rem, calc((100dvh - 4.75rem) * var(--student-card-stage-ratio, 1.95)));
     max-height: calc((100dvh - 4.75rem) * 0.92);
   }
 
