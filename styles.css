@@ -1856,6 +1856,7 @@ body {
   min-height: 0;
   max-height: calc((100dvh - 5.5rem) * 0.9);
   border-color: rgba(255, 255, 255, 0.08);
+  --student-card-image-scale: 1.08;
 }
 
 .document-viewer-shell.is-student-card-viewer {
@@ -1897,6 +1898,7 @@ body {
   border: 1px solid rgba(122, 31, 36, 0.08);
   border-radius: 1.2rem;
   background: #000;
+  --student-card-image-scale: 1.05;
 }
 
 .student-card-image {
@@ -1906,6 +1908,8 @@ body {
   object-position: center center;
   display: block;
   background: #000;
+  transform: scale(var(--student-card-image-scale));
+  transform-origin: center center;
 }
 
 .login-hero-shell {
@@ -2113,6 +2117,7 @@ body {
   .student-card-screen .document-viewer-stage.is-student-card-stage {
     width: min(94%, 72rem, calc((100dvh - 4.75rem) * 1.95));
     max-height: calc((100dvh - 4.75rem) * 0.92);
+    --student-card-image-scale: 1.1;
   }
 
   .document-viewer-shell.is-student-card-viewer {
