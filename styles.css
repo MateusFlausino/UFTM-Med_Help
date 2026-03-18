@@ -1821,6 +1821,8 @@ body {
 }
 
 .student-card-screen {
+  --student-card-fit-scale: 0.8;
+  --student-card-available-height: calc(100dvh - 5.5rem);
   min-height: 100dvh;
   display: grid;
   grid-template-rows: auto 1fr;
@@ -1831,6 +1833,7 @@ body {
     max(0.75rem, env(safe-area-inset-bottom))
     max(0.75rem, env(safe-area-inset-left));
   background: #0f1115;
+  overflow: hidden;
 }
 
 .student-card-screen-top {
@@ -1850,10 +1853,10 @@ body {
 }
 
 .student-card-screen .document-viewer-stage.is-student-card-stage {
-  width: min(100%, 58rem);
+  width: min(100%, 58rem, calc(var(--student-card-available-height) * 1.6));
   height: auto;
   min-height: 0;
-  max-height: calc(100dvh - 5.5rem);
+  max-height: calc(var(--student-card-available-height) * var(--student-card-fit-scale));
   border-color: rgba(255, 255, 255, 0.08);
 }
 
@@ -2102,6 +2105,7 @@ body {
 
 @media (max-width: 760px) and (orientation: landscape) {
   .student-card-screen {
+    --student-card-available-height: calc(100dvh - 4.75rem);
     padding:
       max(0.45rem, env(safe-area-inset-top))
       max(0.6rem, env(safe-area-inset-right))
