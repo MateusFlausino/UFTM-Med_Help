@@ -1628,6 +1628,10 @@ body {
     border-color: rgba(255, 255, 255, 0.08);
     border-radius: 1rem;
   }
+
+  .student-card-screen {
+    gap: 0.7rem;
+  }
 }
 
 .app-frame {
@@ -1815,6 +1819,40 @@ body {
 
 .document-viewer-shell {
   gap: 1rem;
+}
+
+.student-card-screen {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 0.9rem;
+  padding:
+    max(0.85rem, env(safe-area-inset-top))
+    max(0.75rem, env(safe-area-inset-right))
+    max(0.75rem, env(safe-area-inset-bottom))
+    max(0.75rem, env(safe-area-inset-left));
+  background: #0f1115;
+}
+
+.student-card-screen-top {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.student-card-back {
+  width: auto;
+  min-width: 7rem;
+}
+
+.student-card-screen-body {
+  min-height: 0;
+  display: grid;
+}
+
+.student-card-screen .document-viewer-stage.is-student-card-stage {
+  height: 100%;
+  min-height: 100%;
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .document-viewer-shell.is-student-card-viewer {
@@ -2059,6 +2097,14 @@ body {
 }
 
 @media (max-width: 760px) and (orientation: landscape) {
+  .student-card-screen {
+    padding:
+      max(0.45rem, env(safe-area-inset-top))
+      max(0.6rem, env(safe-area-inset-right))
+      max(0.45rem, env(safe-area-inset-bottom))
+      max(0.6rem, env(safe-area-inset-left));
+  }
+
   .document-viewer-shell.is-student-card-viewer {
     padding:
       max(0.5rem, env(safe-area-inset-top))

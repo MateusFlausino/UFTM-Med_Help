@@ -569,6 +569,11 @@ function render() {
     return;
   }
 
+  if (state.activeTab === DOCUMENT_VIEWER_TAB_ID && state.documentViewer?.documentType === DOCUMENT_TYPES.studentCard) {
+    appElement.innerHTML = renderStudentCardScreen();
+    return;
+  }
+
   const registration = getRegistrationState();
   const activeUpload = registration.scheduleUpload;
   const statusBanner = renderStatusBanner(registration);
@@ -688,6 +693,26 @@ function renderMainPanel(activeUpload, registration = getRegistrationState()) {
   }
 
   return renderPortalTab(activeUpload);
+}
+
+function renderStudentCardScreen() {
+  const viewer = state.documentViewer || createEmptyDocumentViewerState();
+  const frameSrc = viewer.externalUrl || viewer.objectUrl || "";
+
+  return `
+    <section class="student-card-screen">
+      <div class="student-card-screen-top">
+        <button class="ghost student-card-back" data-action="close-document-viewer">Voltar</button>
+      </div>
+      <div class="student-card-screen-body">
+        ${viewer.loading
+          ? `<div class="empty-state">Carregando o ID digital dentro do app...</div>`
+          : frameSrc
+            ? `<div class="document-viewer-stage is-student-card-stage"><img class="student-card-image" src="${escapeAttribute(frameSrc)}" alt="Carteirinha estudantil" referrerpolicy="no-referrer" decoding="async" /></div>`
+            : `<div class="empty-state">Nao consegui preparar o ID digital agora.</div>`}
+      </div>
+    </section>
+  `;
 }
 
 function renderDocumentViewer() {
