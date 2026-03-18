@@ -23,7 +23,7 @@ module.exports = async function handler(request, response) {
     response.end(
       JSON.stringify({
         success: false,
-        message: error?.message || "não consegui carregar o conteúdo do DAGV agora",
+        message: "não consegui carregar o conteúdo do DAGV agora",
       }),
     );
   }

@@ -110,7 +110,7 @@ const defaultMenu = [
 
 const appElement = document.getElementById("app");
 const uiState = loadUiState();
-const supabaseConfig = window.UFTM_SUPABASE_CONFIG || {};
+const supabaseConfig = readPublicSupabaseConfig(window.UFTM_SUPABASE_CONFIG || {});
 const supabaseReady = hasSupabaseConfig(supabaseConfig);
 const canUseGoogleAuth = window.location.protocol !== "file:";
 const services = {
@@ -119,6 +119,8 @@ const services = {
 let localDbPromise = null;
 let persistentUploadsIssue = "";
 let authSubscription = null;
+
+clearPublicBootstrapData();
 
 let state = {
   activeTab: uiState.activeTab || "home",
@@ -150,7 +152,6 @@ appElement.addEventListener("change", onChange);
 appElement.addEventListener("input", onInput);
 
 init().catch((error) => {
-  console.error("Falha ao iniciar o painel do DAGV com Supabase.", error);
   appElement.innerHTML = renderStartupFailure(error);
 });
 
@@ -204,6 +205,7 @@ async function init() {
     }
 
     await handleSupabaseSession(sessionData.session);
+    clearSensitiveUrlData();
   } catch (error) {
     setState({
       authChecking: false,
@@ -524,70 +526,57 @@ function render() {
 function renderLogin() {
   const canLogin = !state.authChecking && state.supabaseReady && state.canUseGoogleAuth;
   const loginLabel = state.authChecking ? "Conectando..." : "Entrar com Google";
-  const setupTitle = !state.supabaseReady
-    ? `Configure o arquivo ${SUPABASE_CONFIG_FILE} para habilitar login Google e PDFs privados na nuvem.`
-    : !state.canUseGoogleAuth
-      ? "Abra o app em http://localhost:4173 ou no deploy para usar o login Google."
-      : "Entre com sua conta Google para guardar a grade horaria e a carteirinha estudantil antes do primeiro uso.";
+  const supportMessage = state.authError
+    || (!state.supabaseReady
+      ? "O acesso online ainda está sendo preparado para este ambiente."
+      : !state.canUseGoogleAuth
+        ? "Abra o app pelo navegador para continuar com o login."
+        : "Entre com sua conta Google para começar.")
+    || "";
 
   return `
-    <div class="login-layout">
-      <section class="login-card">
-        <span class="eyebrow">Painel do DA</span>
-        <h1>${APP_NAME}, com login Google e documentos privados na nuvem.</h1>
-        <p>${escape(setupTitle)}</p>
-        <div class="login-actions" style="margin-top: 1rem;">
+    <section class="login-hero-shell">
+      <div class="login-hero">
+        <span class="login-kicker">Desenvolvido pelo DAGV</span>
+        <div class="login-brand-lockup">
+          <span class="login-brand-mark">${APP_MARK}</span>
+          <span class="login-brand-name">${APP_NAME}</span>
+        </div>
+        <h1>Sua rotina academica, mais simples.</h1>
+        <p class="login-subtitle">Um app feito para simplificar a vida dos estudantes e desenvolvido pelo DA.</p>
+        <div class="login-ribbon" aria-label="Principais areas do app">
+          <span class="login-chip">Grade horaria</span>
+          <span class="login-chip">RU</span>
+          <span class="login-chip">ID digital</span>
+        </div>
+        <div class="login-actions login-actions-hero">
           <button class="cta" data-action="login-google" ${canLogin ? "" : "disabled"}>${escape(loginLabel)}</button>
           <a class="ghost link-button" href="${escapeAttribute(DA_PORTAL_URL)}" target="_blank" rel="noreferrer">Portal do DA</a>
-          <button class="ghost" data-action="sync-ru">Atualizar RU</button>
         </div>
-        <div class="toast ${state.authError ? "is-warning" : ""}" style="margin-top: 1rem;">
-          ${escape(state.authError || state.syncMessage || "O login acontece pelo Google via Supabase Auth. Grade horaria e carteirinha ficam no Storage privado da conta.")}
-        </div>
-        <div class="facts-grid" style="margin-top: 1.25rem;">
-          <div class="fact"><strong>Conta online</strong><p>login com Google</p></div>
-          <div class="fact"><strong>Do DA</strong><p>marca e entrada centralizadas no diretório</p></div>
-          <div class="fact"><strong>Cadastro inicial</strong><p>grade horaria e carteirinha antes do primeiro uso</p></div>
-        </div>
-      </section>
-
-      <aside class="preview-card">
-        <span class="eyebrow">Identidade DAGV</span>
-        <h2 class="preview-title">Horarios, RU e ID estudantil reunidos em um painel do DA.</h2>
-        <p class="preview-copy">
-          O aluno entra com Google, conclui o cadastro com grade horaria e carteirinha em PDF e depois acompanha agenda, semana e RU em uma interface pensada para o diretório academico.
-        </p>
-        <div class="pill-grid">
-          <div class="preview-pill"><strong>Painel do DA</strong><span>atalho direto para o portal estudantil</span></div>
-          <div class="preview-pill"><strong>ID digital</strong><span>abre o PDF salvo no menu lateral</span></div>
-          <div class="preview-pill"><strong>Agenda real</strong><span>horarios e disciplinas saem do SCA</span></div>
-        </div>
-        <div class="mini-stack">
-          <div class="mini-card"><small>Passo 1</small><strong>Entrar</strong><span>use sua conta Google</span></div>
-          <div class="mini-card"><small>Passo 2</small><strong>Concluir cadastro</strong><span>grade horaria e carteirinha ficam salvas na conta</span></div>
-          <div class="mini-card"><small>Passo 3</small><strong>Acompanhar o dia</strong><span>aulas e RU liberam apos a leitura</span></div>
-        </div>
-      </aside>
-    </div>
+        <p class="login-support ${state.authError ? "is-warning" : ""}">${escape(supportMessage)}</p>
+      </div>
+    </section>
   `;
 }
 
 function renderStartupFailure(error) {
   return `
-    <div class="login-layout">
-      <section class="login-card">
-        <span class="eyebrow">Painel do DA</span>
-        <h1>Não consegui iniciar o painel online.</h1>
-        <p>O aplicativo encontrou um erro logo na abertura. Recarregue a página ou abra o portal oficial do diretório.</p>
-        <div class="toast is-warning" style="margin-top: 1rem;">
-          ${escape(describeLocalError(error))}
+    <section class="login-hero-shell login-hero-shell-error">
+      <div class="login-hero">
+        <span class="login-kicker">Painel do DAGV</span>
+        <div class="login-brand-lockup">
+          <span class="login-brand-mark">${APP_MARK}</span>
+          <span class="login-brand-name">${APP_NAME}</span>
         </div>
-        <div class="login-actions" style="margin-top: 1rem;">
+        <h1>Não conseguimos abrir o app agora.</h1>
+        <p class="login-subtitle">Tente novamente em instantes ou siga pelo portal oficial do DAGV.</p>
+        <div class="login-actions login-actions-hero">
           <button class="cta" data-action="reload-app">Tentar novamente</button>
           <a class="ghost link-button" href="${escapeAttribute(DA_PORTAL_URL)}" target="_blank" rel="noreferrer">Portal do DA</a>
         </div>
-      </section>
-    </div>
+        <p class="login-support is-warning">${escape(describeLocalError(error))}</p>
+      </div>
+    </section>
   `;
 }
 
@@ -2013,7 +2002,7 @@ function hasSupabaseConfig(config) {
 function describeSupabaseError(error) {
   const code = String(error?.code || error?.error_code || "");
   const message = String(error?.message || error?.error_description || "");
-  const fallback = message || describeLocalError(error);
+  const fallback = describeLocalError(error);
   const normalized = `${code} ${message}`.toLowerCase();
 
   if (normalized.includes("network") || normalized.includes("fetch")) {
@@ -2053,6 +2042,59 @@ function describeSupabaseError(error) {
   }
 
   return fallback;
+}
+
+function readPublicSupabaseConfig(rawConfig) {
+  return Object.freeze({
+    url: String(rawConfig?.url || "").trim(),
+    anonKey: String(rawConfig?.anonKey || rawConfig?.publishableKey || "").trim(),
+    bucket: String(rawConfig?.bucket || SUPABASE_BUCKET || "").trim(),
+  });
+}
+
+function clearPublicBootstrapData() {
+  try {
+    delete window.UFTM_SUPABASE_CONFIG;
+  } catch (error) {
+    window.UFTM_SUPABASE_CONFIG = undefined;
+  }
+}
+
+function clearSensitiveUrlData() {
+  try {
+    const url = new URL(window.location.href);
+    const keys = ["code", "access_token", "refresh_token", "token_type", "expires_in", "expires_at", "provider_token", "provider_refresh_token"];
+    let changed = false;
+
+    for (const key of keys) {
+      if (url.searchParams.has(key)) {
+        url.searchParams.delete(key);
+        changed = true;
+      }
+    }
+
+    if (url.hash) {
+      const hashParams = new URLSearchParams(url.hash.replace(/^#/, ""));
+      let hashChanged = false;
+      for (const key of keys) {
+        if (hashParams.has(key)) {
+          hashParams.delete(key);
+          hashChanged = true;
+        }
+      }
+
+      if (hashChanged) {
+        url.hash = hashParams.toString() ? `#${hashParams.toString()}` : "";
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      window.history.replaceState({}, document.title, `${url.pathname}${url.search}${url.hash}`);
+    }
+  } catch (error) {
+    // Ignoramos falhas de limpeza de URL para não interromper o app.
+  }
 }
 
 function timestampToIso(value) {
@@ -2203,9 +2245,6 @@ function persistUiState() {
       agendaTab: state.agendaTab,
       sidebarOpen: state.sidebarOpen,
       referenceDate: state.referenceDate,
-      menu: state.menu,
-      lastMenuSync: state.lastMenuSync,
-      syncMessage: state.syncMessage,
     }),
   );
 }
@@ -2384,7 +2423,33 @@ async function listUploadsForUser(ownerUid) {
 }
 
 function describeLocalError(error) {
-  return error?.message || "erro desconhecido";
+  const message = String(error?.message || "").toLowerCase();
+
+  if (!message) {
+    return "não consegui concluir esta etapa agora";
+  }
+
+  if (message.includes("fetch") || message.includes("network") || message.includes("failed to fetch")) {
+    return "não consegui falar com o servidor agora";
+  }
+
+  if (message.includes("pdf")) {
+    return "não consegui processar o PDF informado";
+  }
+
+  if (message.includes("permission") || message.includes("security") || message.includes("denied")) {
+    return "o navegador bloqueou esta operação";
+  }
+
+  if (message.includes("timeout")) {
+    return "a operação demorou mais do que o esperado";
+  }
+
+  if (message.includes("auth") || message.includes("oauth") || message.includes("token")) {
+    return "não consegui concluir a autenticação agora";
+  }
+
+  return "não consegui concluir esta etapa agora";
 }
 
 function createLocalUid(email) {

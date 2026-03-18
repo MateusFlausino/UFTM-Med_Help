@@ -4,6 +4,19 @@ const path = require("path");
 
 const port = Number(process.env.PORT || 4173);
 const root = process.cwd();
+const rootPath = path.resolve(root);
+const cspDirectives = [
+  "default-src 'self'",
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  "script-src 'self' https://esm.sh",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https://dagvmeduftm.wordpress.com https://*.wordpress.com https://*.wp.com https://*.supabase.co",
+  "connect-src 'self' https://*.supabase.co wss://*.supabase.co",
+  "font-src 'self' data:",
+];
 
 const contentTypes = {
   ".html": "text/html; charset=utf-8",
@@ -19,6 +32,8 @@ const contentTypes = {
 };
 
 const server = http.createServer((request, response) => {
+  applySecurityHeaders(response);
+
   if ((request.url || "").startsWith("/api/dagv-content")) {
     handleApiRoute("./api/dagv-content", request, response);
     return;
@@ -36,7 +51,14 @@ const server = http.createServer((request, response) => {
 
   const requestUrl = request.url === "/" ? "/index.html" : request.url || "/index.html";
   const safePath = path.normalize(decodeURIComponent(requestUrl)).replace(/^(\.\.[/\\])+/, "");
-  const filePath = path.join(root, safePath);
+  const relativePath = safePath.startsWith("/") ? `.${safePath}` : safePath;
+  const filePath = path.resolve(root, relativePath);
+
+  if (filePath !== rootPath && !filePath.startsWith(`${rootPath}${path.sep}`)) {
+    response.writeHead(403, { "Content-Type": "text/plain; charset=utf-8" });
+    response.end("Acesso negado.");
+    return;
+  }
 
   fs.readFile(filePath, (error, data) => {
     if (error) {
@@ -63,8 +85,18 @@ async function handleApiRoute(modulePath, request, response) {
       "Content-Type": "application/json; charset=utf-8",
       "Cache-Control": "no-store",
     });
-    response.end(JSON.stringify({ success: false, message: error.message }));
+    response.end(JSON.stringify({ success: false, message: "não consegui concluir esta operação agora" }));
   }
+}
+
+function applySecurityHeaders(response) {
+  response.setHeader("Cache-Control", "no-store");
+  response.setHeader("Content-Security-Policy", cspDirectives.join("; "));
+  response.setHeader("Referrer-Policy", "no-referrer");
+  response.setHeader("X-Content-Type-Options", "nosniff");
+  response.setHeader("X-Frame-Options", "DENY");
+  response.setHeader("Permissions-Policy", "camera=(), microphone=(), geolocation=(), display-capture=()");
+  response.setHeader("Cross-Origin-Opener-Policy", "same-origin");
 }
 
 server.listen(port, () => {

@@ -33,10 +33,11 @@ module.exports = async function handler(request, response) {
   } catch (error) {
     response.statusCode = 400;
     response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.setHeader("Cache-Control", "no-store");
     response.end(
       JSON.stringify({
         success: false,
-        message: error?.message || "erro desconhecido ao processar o PDF",
+        message: describeSafePdfError(error),
       }),
     );
   }
@@ -78,4 +79,22 @@ function decodeHeaderValue(value) {
   } catch (error) {
     return String(Array.isArray(value) ? value[0] : value);
   }
+}
+
+function describeSafePdfError(error) {
+  const message = String(error?.message || "").toLowerCase();
+
+  if (!message) {
+    return "não consegui processar o PDF agora";
+  }
+
+  if (message.includes("nenhum pdf")) {
+    return "nenhum PDF foi enviado";
+  }
+
+  if (message.includes("pdf")) {
+    return "não consegui processar o PDF informado";
+  }
+
+  return "não consegui processar o PDF agora";
 }

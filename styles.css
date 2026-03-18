@@ -1729,6 +1729,157 @@ body {
   background: #faf7f5;
 }
 
+.login-hero-shell {
+  position: relative;
+  min-height: calc(100vh - 1rem);
+  display: grid;
+  place-items: center;
+  padding: clamp(2.5rem, 7vw, 5rem) 0.5rem;
+  overflow: hidden;
+}
+
+.login-hero-shell::before,
+.login-hero-shell::after {
+  content: "";
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(0);
+  pointer-events: none;
+}
+
+.login-hero-shell::before {
+  width: 22rem;
+  height: 22rem;
+  top: -8rem;
+  right: -6rem;
+  background: radial-gradient(circle, rgba(214, 169, 153, 0.36) 0%, rgba(214, 169, 153, 0) 70%);
+}
+
+.login-hero-shell::after {
+  width: 20rem;
+  height: 20rem;
+  bottom: -7rem;
+  left: -6rem;
+  background: radial-gradient(circle, rgba(122, 31, 36, 0.18) 0%, rgba(122, 31, 36, 0) 72%);
+}
+
+.login-hero {
+  position: relative;
+  z-index: 1;
+  width: min(100%, 44rem);
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 1.15rem;
+}
+
+.login-kicker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.3rem;
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  background: rgba(122, 31, 36, 0.08);
+  color: var(--green);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.login-brand-lockup {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.login-brand-mark {
+  display: inline-grid;
+  place-items: center;
+  min-width: 4.2rem;
+  min-height: 4.2rem;
+  padding: 0.75rem;
+  border-radius: 1.4rem;
+  background: linear-gradient(135deg, var(--green) 0%, var(--green-deep) 100%);
+  color: #fff;
+  font-family: var(--font-display);
+  font-size: 1.15rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  box-shadow: 0 18px 36px rgba(99, 27, 37, 0.18);
+}
+
+.login-brand-name {
+  color: var(--green-deep);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.login-hero h1 {
+  margin: 0;
+  max-width: 11ch;
+  color: var(--ink);
+  font-size: clamp(3rem, 8vw, 5.5rem);
+  line-height: 0.95;
+}
+
+.login-subtitle {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: clamp(1.05rem, 2.2vw, 1.25rem);
+  line-height: 1.6;
+}
+
+.login-ribbon {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.65rem;
+}
+
+.login-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 2.4rem;
+  padding: 0.55rem 0.95rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  border: 1px solid rgba(122, 31, 36, 0.1);
+  color: var(--green-deep);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.login-actions-hero {
+  justify-content: center;
+  margin-top: 0.45rem;
+}
+
+.login-actions-hero > * {
+  min-width: min(100%, 15rem);
+}
+
+.login-support {
+  margin: 0.2rem 0 0;
+  max-width: 32rem;
+  color: var(--muted);
+  font-size: 0.98rem;
+}
+
+.login-support.is-warning {
+  color: #7a4d12;
+}
+
+.login-hero-shell-error .login-kicker {
+  background: rgba(166, 71, 50, 0.1);
+  color: var(--danger);
+}
+
 @media (max-width: 760px) {
   .sidebar-panel {
     width: min(20rem, calc(100vw - 2.5rem));
@@ -1741,6 +1892,29 @@ body {
   .header-pill {
     padding-inline: 0.75rem;
     font-size: 0.8rem;
+  }
+
+  .login-hero-shell {
+    min-height: calc(100vh - 0.75rem);
+    padding-inline: 0;
+  }
+
+  .login-brand-lockup {
+    flex-direction: column;
+    gap: 0.65rem;
+  }
+
+  .login-hero h1 {
+    max-width: 9ch;
+  }
+
+  .login-actions-hero {
+    width: 100%;
+    flex-direction: column;
+  }
+
+  .login-actions-hero > * {
+    width: 100%;
   }
 }
 

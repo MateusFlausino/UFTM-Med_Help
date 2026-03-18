@@ -12,14 +12,16 @@ module.exports = async function handler(request, response) {
     const menu = await getTodayAbadiaMenu();
     response.statusCode = 200;
     response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.setHeader("Cache-Control", "no-store");
     response.end(JSON.stringify({ success: true, menu }));
   } catch (error) {
     response.statusCode = 500;
     response.setHeader("Content-Type", "application/json; charset=utf-8");
+    response.setHeader("Cache-Control", "no-store");
     response.end(
       JSON.stringify({
         success: false,
-        message: error.message,
+        message: "não consegui buscar o cardápio agora",
       })
     );
   }
