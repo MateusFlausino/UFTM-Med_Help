@@ -3,6 +3,7 @@ import { extractScaPdfData } from "./sca-parser.js";
 const APP_NAME = "Agenda DAGV";
 const APP_MARK = "DAGV";
 const APP_TAGLINE = "Horários, RU e SCA no espaço do DA";
+const DA_PORTAL_URL = "https://dagvmeduftm.wordpress.com/";
 
 const UI_STORAGE_KEY = "uftm-mobile-local-ui-v1";
 const SESSION_STORAGE_KEY = "uftm-mobile-local-session-v1";
@@ -121,7 +122,10 @@ appElement.addEventListener("click", onClick);
 appElement.addEventListener("change", onChange);
 appElement.addEventListener("input", onInput);
 
-init();
+init().catch((error) => {
+  console.error("Falha ao iniciar o painel local do DAGV.", error);
+  appElement.innerHTML = renderStartupFailure(error);
+});
 
 async function init() {
   render();
@@ -304,6 +308,25 @@ function renderLogin() {
           <div class="mini-card"><small>Passo 3</small><strong>Acompanhar o dia</strong><span>aulas e RU ficam prontos após a leitura</span></div>
         </div>
       </aside>
+    </div>
+  `;
+}
+
+function renderStartupFailure(error) {
+  return `
+    <div class="login-layout">
+      <section class="login-card">
+        <span class="eyebrow">Painel do DA</span>
+        <h1>Não consegui iniciar o painel local.</h1>
+        <p>O aplicativo encontrou um erro logo na abertura. Recarregue a página ou abra o portal oficial do diretório.</p>
+        <div class="toast is-warning" style="margin-top: 1rem;">
+          ${escape(describeLocalError(error))}
+        </div>
+        <div class="login-actions" style="margin-top: 1rem;">
+          <button class="cta" data-action="reload-app">Tentar novamente</button>
+          <a class="ghost link-button" href="${escapeAttribute(DA_PORTAL_URL)}" target="_blank" rel="noreferrer">Portal do DA</a>
+        </div>
+      </section>
     </div>
   `;
 }
@@ -828,6 +851,11 @@ async function onClick(event) {
 
   if (action === "sync-ru") {
     refreshRuMenu(false);
+    return;
+  }
+
+  if (action === "reload-app") {
+    window.location.reload();
     return;
   }
 
