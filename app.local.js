@@ -8,6 +8,7 @@ const DA_PORTAL_URL = "https://dagvmeduftm.wordpress.com/";
 const SUPABASE_CONFIG_FILE = "supabase-config.js";
 const SUPABASE_BUCKET = "student-pdfs";
 const REGISTRATION_TAB_ID = "registration";
+const DOCUMENT_VIEWER_TAB_ID = "document-viewer";
 const DOCUMENT_TYPES = {
   schedule: "schedule",
   studentCard: "student_card",
@@ -41,13 +42,13 @@ const AGENDA_NAV_ITEMS = [
 ];
 
 const SIDEBAR_ITEMS = [
-  { id: "home", label: "Inicio", mark: "IN", action: "set-main-tab", tab: "home" },
-  { id: REGISTRATION_TAB_ID, label: "Cadastro", mark: "CA", action: "open-registration" },
-  { id: "student-card", label: "ID Digital", mark: "ID", action: "open-student-card" },
-  { id: "today", label: "Grade Horaria", mark: "GR", action: "open-academic-tab", tab: "today" },
-  { id: "menu", label: "Restaurantes", mark: "RU", action: "open-academic-tab", tab: "menu" },
-  { id: "dagv", label: "DAGV", mark: "DA", action: "set-main-tab", tab: "dagv" },
-  { id: "links", label: "Links", mark: "LK", action: "set-main-tab", tab: "links" },
+  { id: "home", label: "Inicio", icon: "home", action: "set-main-tab", tab: "home" },
+  { id: REGISTRATION_TAB_ID, label: "Cadastro", icon: "user-plus", action: "open-registration" },
+  { id: "student-card", label: "ID Digital", icon: "id-card", action: "open-student-card" },
+  { id: "today", label: "Grade Horaria", icon: "calendar-day", action: "open-academic-tab", tab: "today" },
+  { id: "menu", label: "Restaurantes", icon: "utensils", action: "open-academic-tab", tab: "menu" },
+  { id: "dagv", label: "DAGV", icon: "newspaper", action: "set-main-tab", tab: "dagv" },
+  { id: "links", label: "Links", icon: "link", action: "set-main-tab", tab: "links" },
 ];
 
 const DAGV_LINKS = [
@@ -141,6 +142,7 @@ let state = {
   uploadError: "",
   uploadProgress: 0,
   openingUploadId: "",
+  documentViewer: createEmptyDocumentViewerState(),
   portalContent: {},
   newsFeed: [],
   portalLoadingTab: "",
@@ -218,6 +220,7 @@ async function handleSupabaseSession(session) {
   const user = session?.user || null;
 
   if (!user) {
+    revokeActiveDocumentViewer();
     setState({
       authChecking: false,
       authError: "",
@@ -231,6 +234,7 @@ async function handleSupabaseSession(session) {
       activeTab: "home",
       agendaTab: "today",
       sidebarOpen: false,
+      documentViewer: createEmptyDocumentViewerState(),
     });
     return;
   }
@@ -469,6 +473,18 @@ function hasCompletedRegistration(uploads, profile) {
   return Boolean(activeSchedule && studentCardUploads[0]);
 }
 
+function createEmptyDocumentViewerState() {
+  return {
+    uploadId: "",
+    title: "",
+    objectUrl: "",
+    documentType: "",
+    sourceTab: "home",
+    sourceAgendaTab: "today",
+    loading: false,
+  };
+}
+
 function stopUserSubscriptions() {
   return;
 }
@@ -489,7 +505,10 @@ function render() {
       ${renderSidebar(registration)}
       <div class="app-view ios-shell campus-shell">
         <header class="header-bar compact-header">
-          <button class="brand-mark brand-mark-button menu-toggle" data-action="toggle-sidebar">Menu</button>
+          <button class="brand-mark brand-mark-button menu-toggle" data-action="toggle-sidebar" aria-label="Abrir menu lateral">
+            ${renderUiIcon("menu", "menu-toggle-icon")}
+            <span class="sr-only">Menu</span>
+          </button>
           <div class="header-brand header-brand-centered">
             <div class="header-copy">
               <span class="header-kicker">Painel do DAGV</span>
@@ -539,7 +558,7 @@ function renderLogin() {
       <div class="login-hero">
         <span class="login-kicker">Desenvolvido pelo DAGV</span>
         <div class="login-brand-lockup">
-          <span class="login-brand-mark">${APP_MARK}</span>
+          <img class="login-brand-mark-image" src="./icon.png" alt="DAGV" />
           <span class="login-brand-name">${APP_NAME}</span>
         </div>
         <h1>Sua rotina academica, mais simples.</h1>
@@ -565,7 +584,7 @@ function renderStartupFailure(error) {
       <div class="login-hero">
         <span class="login-kicker">Painel do DAGV</span>
         <div class="login-brand-lockup">
-          <span class="login-brand-mark">${APP_MARK}</span>
+          <img class="login-brand-mark-image" src="./icon.png" alt="DAGV" />
           <span class="login-brand-name">${APP_NAME}</span>
         </div>
         <h1>Não conseguimos abrir o app agora.</h1>
@@ -581,6 +600,10 @@ function renderStartupFailure(error) {
 }
 
 function renderMainPanel(activeUpload, registration = getRegistrationState()) {
+  if (state.activeTab === DOCUMENT_VIEWER_TAB_ID) {
+    return renderDocumentViewer();
+  }
+
   if (state.activeTab === REGISTRATION_TAB_ID) {
     return renderRegistrationPanel(registration);
   }
@@ -594,6 +617,35 @@ function renderMainPanel(activeUpload, registration = getRegistrationState()) {
   }
 
   return renderPortalTab(activeUpload);
+}
+
+function renderDocumentViewer() {
+  const viewer = state.documentViewer || createEmptyDocumentViewerState();
+  const title = viewer.documentType === DOCUMENT_TYPES.studentCard
+    ? "Carteirinha estudantil"
+    : viewer.title || "Documento";
+  const topline = viewer.documentType === DOCUMENT_TYPES.studentCard ? "ID digital" : "Documento";
+
+  return `
+    <section class="section-stack simple-stack">
+      <section class="paper-card simple-section document-viewer-shell">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">${escape(topline)}</div>
+            <h2 class="section-title">${escape(title)}</h2>
+          </div>
+          <div class="button-row">
+            <button class="ghost" data-action="close-document-viewer">Voltar</button>
+          </div>
+        </div>
+        ${viewer.loading
+          ? `<div class="empty-state" style="margin-top: 1rem;">Carregando o PDF dentro do app...</div>`
+          : viewer.objectUrl
+            ? `<iframe class="document-viewer-frame" src="${escapeAttribute(`${viewer.objectUrl}#toolbar=0&navpanes=0&scrollbar=1`)}" title="${escapeAttribute(title)}"></iframe>`
+            : `<div class="empty-state" style="margin-top: 1rem;">Nao consegui preparar este PDF agora.</div>`}
+      </section>
+    </section>
+  `;
 }
 
 function renderSidebar(registration) {
@@ -617,7 +669,7 @@ function renderSidebar(registration) {
 
       <div class="sidebar-footer">
         <button class="sidebar-item sidebar-item-footer" data-action="logout">
-          <span class="sidebar-item-mark">SA</span>
+          <span class="sidebar-item-mark">${renderUiIcon("logout", "sidebar-item-icon")}</span>
           <span>Sair</span>
         </button>
       </div>
@@ -626,12 +678,17 @@ function renderSidebar(registration) {
 }
 
 function renderSidebarItem(item, registration) {
-  const isActive = item.id === state.activeTab || (state.activeTab === "academic" && item.tab === state.agendaTab);
+  const isViewerStudentCard = state.activeTab === DOCUMENT_VIEWER_TAB_ID
+    && state.documentViewer.documentType === DOCUMENT_TYPES.studentCard
+    && item.action === "open-student-card";
+  const isActive = item.id === state.activeTab
+    || (state.activeTab === "academic" && item.tab === state.agendaTab)
+    || isViewerStudentCard;
   const isLocked = !registration.isComplete && item.action !== "open-registration" && item.action !== "open-student-card";
 
   return `
     <button class="sidebar-item ${isActive ? "is-active" : ""} ${isLocked ? "is-locked" : ""}" data-action="${escapeAttribute(item.action)}" ${item.tab ? `data-tab="${escapeAttribute(item.tab)}"` : ""}>
-      <span class="sidebar-item-mark">${escape(item.mark)}</span>
+      <span class="sidebar-item-mark">${renderUiIcon(item.icon || "circle", "sidebar-item-icon")}</span>
       <span>${escape(item.label)}</span>
     </button>
   `;
@@ -791,12 +848,12 @@ function renderPortalTab(activeUpload) {
         </section>
 
         <section class="home-shortcuts">
-          ${renderHomeShortcut("HJ", "Hoje", "open-academic-tab", "today")}
-          ${renderHomeShortcut("RU", "RU", "open-academic-tab", "menu")}
-          ${renderHomeShortcut("GR", "Semana", "open-academic-tab", "week")}
-          ${renderHomeShortcut("CA", "Cadastro", "open-registration", "")}
-          ${renderHomeShortcut("DA", "DAGV", "set-main-tab", "dagv")}
-          ${renderHomeShortcut("LK", "Links", "set-main-tab", "links")}
+          ${renderHomeShortcut("calendar-day", "Hoje", "open-academic-tab", "today")}
+          ${renderHomeShortcut("utensils", "RU", "open-academic-tab", "menu")}
+          ${renderHomeShortcut("calendar-grid", "Semana", "open-academic-tab", "week")}
+          ${renderHomeShortcut("user-plus", "Cadastro", "open-registration", "")}
+          ${renderHomeShortcut("newspaper", "DAGV", "set-main-tab", "dagv")}
+          ${renderHomeShortcut("link", "Links", "set-main-tab", "links")}
         </section>
 
         <section class="paper-card simple-section">
@@ -1137,11 +1194,94 @@ function renderAvatar(user) {
   return `<span class="avatar-fallback">${escape(initials(user.displayName || user.email || "Aluno"))}</span>`;
 }
 
+function renderUiIcon(iconName, className = "ui-icon") {
+  const svgBodyMap = {
+    home: `
+      <path d="M4 10.5 12 4l8 6.5"></path>
+      <path d="M6 9.5V20h12V9.5"></path>
+      <path d="M10 20v-5h4v5"></path>
+    `,
+    "user-plus": `
+      <circle cx="9" cy="8" r="3"></circle>
+      <path d="M4 20c0-3 2.3-5 5-5s5 2 5 5"></path>
+      <path d="M18 8v6"></path>
+      <path d="M15 11h6"></path>
+    `,
+    "id-card": `
+      <rect x="3" y="5" width="18" height="14" rx="3"></rect>
+      <circle cx="8" cy="11" r="2"></circle>
+      <path d="M5.5 16c.8-1.6 2-2.4 3.8-2.4 1.7 0 2.9.8 3.7 2.4"></path>
+      <path d="M15 10h3.5"></path>
+      <path d="M15 13h3.5"></path>
+    `,
+    "calendar-day": `
+      <rect x="3" y="5" width="18" height="16" rx="3"></rect>
+      <path d="M8 3v4"></path>
+      <path d="M16 3v4"></path>
+      <path d="M3 9.5h18"></path>
+      <circle cx="12" cy="15" r="2.2" class="icon-fill"></circle>
+    `,
+    "calendar-grid": `
+      <rect x="3" y="5" width="18" height="16" rx="3"></rect>
+      <path d="M8 3v4"></path>
+      <path d="M16 3v4"></path>
+      <path d="M3 9.5h18"></path>
+      <path d="M8 13h3"></path>
+      <path d="M13 13h3"></path>
+      <path d="M8 17h3"></path>
+      <path d="M13 17h3"></path>
+    `,
+    utensils: `
+      <path d="M6 3v7"></path>
+      <path d="M8.5 3v7"></path>
+      <path d="M11 3v7"></path>
+      <path d="M8.5 10v11"></path>
+      <path d="M17 3v18"></path>
+      <path d="M17 3c2.2 1.4 3 4 3 7v1.5h-6"></path>
+    `,
+    newspaper: `
+      <rect x="3" y="5" width="18" height="14" rx="2.5"></rect>
+      <rect x="6.5" y="8.5" width="4" height="4" rx=".6" class="icon-fill"></rect>
+      <path d="M12.5 9h4.5"></path>
+      <path d="M12.5 12h4.5"></path>
+      <path d="M6.5 15h10.5"></path>
+    `,
+    link: `
+      <path d="M10 14 14 10"></path>
+      <path d="M7.5 16.5l-1 1a3 3 0 0 1-4.2-4.2l3-3a3 3 0 0 1 4.2 0"></path>
+      <path d="M16.5 7.5l1-1a3 3 0 0 1 4.2 4.2l-3 3a3 3 0 0 1-4.2 0"></path>
+    `,
+    logout: `
+      <path d="M10 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h4"></path>
+      <path d="M13 16l4-4-4-4"></path>
+      <path d="M9 12h8"></path>
+    `,
+    menu: `
+      <path d="M4 7h16"></path>
+      <path d="M4 12h16"></path>
+      <path d="M4 17h16"></path>
+    `,
+    circle: `
+      <circle cx="12" cy="12" r="6" class="icon-fill"></circle>
+    `,
+  };
+
+  return `
+    <svg class="${escapeAttribute(className)}" viewBox="0 0 24 24" aria-hidden="true" focusable="false" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+      ${svgBodyMap[iconName] || svgBodyMap.circle}
+    </svg>
+  `;
+}
+
 function metric(label, value, caption) {
   return `<div class="metric-card"><small>${escape(label)}</small><strong>${escape(value)}</strong><span>${escape(caption)}</span></div>`;
 }
 
 function getScreenTitle() {
+  if (state.activeTab === DOCUMENT_VIEWER_TAB_ID) {
+    return state.documentViewer.documentType === DOCUMENT_TYPES.studentCard ? "ID Digital" : "Documento";
+  }
+
   if (state.activeTab === REGISTRATION_TAB_ID) {
     return "Cadastro";
   }
@@ -1187,10 +1327,10 @@ function renderStatusBanner(registration = getRegistrationState()) {
   return `<div class="${classes.join(" ")}">${escape(message)}</div>`;
 }
 
-function renderHomeShortcut(mark, label, action, tab) {
+function renderHomeShortcut(iconName, label, action, tab) {
   return `
     <button class="quick-button" data-action="${escapeAttribute(action)}" ${tab ? `data-tab="${escapeAttribute(tab)}"` : ""}>
-      <span class="quick-button-mark">${escape(mark)}</span>
+      <span class="quick-button-mark">${renderUiIcon(iconName, "quick-button-icon")}</span>
       <span class="quick-button-label">${escape(label)}</span>
     </button>
   `;
@@ -1279,10 +1419,17 @@ async function onClick(event) {
     return;
   }
 
+  if (action === "close-document-viewer") {
+    closeDocumentViewer();
+    return;
+  }
+
   if (action === "open-registration") {
+    revokeActiveDocumentViewer();
     setState({
       activeTab: REGISTRATION_TAB_ID,
       sidebarOpen: false,
+      documentViewer: createEmptyDocumentViewerState(),
     });
     return;
   }
@@ -1292,9 +1439,11 @@ async function onClick(event) {
     if (!ensureAccessAfterRegistration(action)) {
       return;
     }
+    revokeActiveDocumentViewer();
     setState({
       activeTab: nextTab,
       sidebarOpen: false,
+      documentViewer: createEmptyDocumentViewerState(),
     });
     if (PORTAL_TABS.has(nextTab)) {
       loadPortalTab(nextTab, true);
@@ -1306,10 +1455,12 @@ async function onClick(event) {
     if (!ensureAccessAfterRegistration(action)) {
       return;
     }
+    revokeActiveDocumentViewer();
     setState({
       activeTab: "academic",
       agendaTab: button.dataset.tab || "today",
       sidebarOpen: false,
+      documentViewer: createEmptyDocumentViewerState(),
     });
     return;
   }
@@ -1318,10 +1469,12 @@ async function onClick(event) {
     if (!ensureAccessAfterRegistration(action)) {
       return;
     }
+    revokeActiveDocumentViewer();
     setState({
       activeTab: "academic",
       agendaTab: button.dataset.tab || "today",
       sidebarOpen: false,
+      documentViewer: createEmptyDocumentViewerState(),
     });
     return;
   }
@@ -1354,9 +1507,11 @@ async function onClick(event) {
   if (action === "open-student-card") {
     const studentCardUpload = getRegistrationState().studentCardUpload;
     if (!studentCardUpload) {
+      revokeActiveDocumentViewer();
       setState({
         activeTab: REGISTRATION_TAB_ID,
         sidebarOpen: false,
+        documentViewer: createEmptyDocumentViewerState(),
         uploadError: "",
         uploadMessage: "A carteirinha digital ainda aguarda o PDF oficial do aluno.",
       });
@@ -1364,7 +1519,7 @@ async function onClick(event) {
     }
 
     setState({ sidebarOpen: false });
-    openUpload(studentCardUpload.id);
+    openUpload(studentCardUpload.id, { inline: true });
     return;
   }
 
@@ -1379,7 +1534,7 @@ async function onClick(event) {
   }
 
   if (action === "open-upload") {
-    openUpload(button.dataset.uploadId || "");
+    openUpload(button.dataset.uploadId || "", { inline: true });
   }
 }
 
@@ -1409,6 +1564,7 @@ async function logout() {
   if (!services.supabase) return;
 
   try {
+    revokeActiveDocumentViewer();
     stopUserSubscriptions();
     const { error } = await services.supabase.auth.signOut();
     if (error) {
@@ -1424,6 +1580,7 @@ async function logout() {
       activeTab: "home",
       agendaTab: "today",
       sidebarOpen: false,
+      documentViewer: createEmptyDocumentViewerState(),
       syncMessage: "Sessão encerrada. Entre novamente para acessar seus PDFs.",
     });
   } catch (error) {
@@ -1858,38 +2015,98 @@ async function setActiveUpload(uploadId) {
   }
 }
 
-async function openUpload(uploadId) {
+async function openUpload(uploadId, options = {}) {
   if (!uploadId) return;
+  const inline = options.inline !== false;
+  const record = state.uploads.find((item) => item.id === uploadId);
+  if (!record || !record.storagePath || !services.supabase) {
+    setState({
+      uploadError: "Não consegui localizar este PDF agora.",
+      uploadMessage: "",
+      openingUploadId: "",
+    });
+    return;
+  }
 
-  const popup = window.open("", "_blank", "noopener");
-  setState({ openingUploadId: uploadId, uploadError: "", uploadMessage: "Abrindo o PDF da conta..." });
+  const sourceTab = state.activeTab === DOCUMENT_VIEWER_TAB_ID
+    ? (state.documentViewer.sourceTab || REGISTRATION_TAB_ID)
+    : state.activeTab;
+  const sourceAgendaTab = state.activeTab === DOCUMENT_VIEWER_TAB_ID
+    ? (state.documentViewer.sourceAgendaTab || state.agendaTab)
+    : state.agendaTab;
+
+  revokeActiveDocumentViewer();
+  setState({
+    openingUploadId: uploadId,
+    uploadError: "",
+    uploadMessage: inline ? "Carregando o PDF dentro do app..." : "Abrindo o PDF da conta...",
+    activeTab: inline ? DOCUMENT_VIEWER_TAB_ID : state.activeTab,
+    documentViewer: inline
+      ? {
+          uploadId,
+          title: record.originalName,
+          objectUrl: "",
+          documentType: record.documentType,
+          sourceTab,
+          sourceAgendaTab,
+          loading: true,
+        }
+      : state.documentViewer,
+  });
 
   try {
-    const record = state.uploads.find((item) => item.id === uploadId);
-    if (!record || !record.storagePath || !services.supabase) {
-      throw new Error("arquivo não encontrado no armazenamento da conta");
-    }
-
     const { data, error } = await services.supabase
       .storage
       .from(getSupabaseBucketName())
-      .createSignedUrl(record.storagePath, 60);
+      .createSignedUrl(record.storagePath, 300);
 
     if (error || !data?.signedUrl) {
       throw error || new Error("não consegui criar um link temporário para este PDF");
     }
 
-    if (popup) {
-      popup.location.href = data.signedUrl;
-    } else {
+    if (!inline) {
       window.open(data.signedUrl, "_blank", "noopener");
+      setState({ openingUploadId: "", uploadMessage: `${record.originalName} aberto em nova aba.`, uploadError: "" });
+      return;
     }
 
-    setState({ openingUploadId: "", uploadMessage: `${record.originalName} aberto em nova aba.`, uploadError: "" });
-  } catch (error) {
-    if (popup) popup.close();
+    const response = await fetch(data.signedUrl, {
+      method: "GET",
+      cache: "no-store",
+      credentials: "omit",
+    });
+
+    if (!response.ok) {
+      throw new Error("não consegui baixar o PDF da conta");
+    }
+
+    const pdfBlob = await response.blob();
+    const objectUrl = URL.createObjectURL(pdfBlob);
+
     setState({
       openingUploadId: "",
+      uploadMessage: record.documentType === DOCUMENT_TYPES.studentCard
+        ? "ID digital carregado dentro do app."
+        : `${record.originalName} carregado dentro do app.`,
+      uploadError: "",
+      activeTab: DOCUMENT_VIEWER_TAB_ID,
+      documentViewer: {
+        uploadId,
+        title: record.originalName,
+        objectUrl,
+        documentType: record.documentType,
+        sourceTab,
+        sourceAgendaTab,
+        loading: false,
+      },
+    });
+  } catch (error) {
+    revokeActiveDocumentViewer();
+    setState({
+      openingUploadId: "",
+      activeTab: sourceTab,
+      agendaTab: sourceAgendaTab,
+      documentViewer: createEmptyDocumentViewerState(),
       uploadError: `Não consegui abrir o PDF: ${describeSupabaseError(error)}`,
       uploadMessage: "",
     });
@@ -2099,6 +2316,30 @@ function clearSensitiveUrlData() {
   } catch (error) {
     // Ignoramos falhas de limpeza de URL para não interromper o app.
   }
+}
+
+function revokeActiveDocumentViewer() {
+  try {
+    if (state.documentViewer?.objectUrl) {
+      URL.revokeObjectURL(state.documentViewer.objectUrl);
+    }
+  } catch (error) {
+    // Ignoramos falhas ao liberar o blob do viewer.
+  }
+}
+
+function closeDocumentViewer() {
+  const sourceTab = state.documentViewer?.sourceTab || REGISTRATION_TAB_ID;
+  const sourceAgendaTab = state.documentViewer?.sourceAgendaTab || "today";
+  revokeActiveDocumentViewer();
+  setState({
+    activeTab: sourceTab,
+    agendaTab: sourceAgendaTab,
+    openingUploadId: "",
+    documentViewer: createEmptyDocumentViewerState(),
+    uploadError: "",
+    uploadMessage: "",
+  });
 }
 
 function timestampToIso(value) {

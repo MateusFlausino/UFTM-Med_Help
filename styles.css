@@ -1404,6 +1404,25 @@ body {
   box-shadow: 0 12px 24px rgba(99, 27, 37, 0.18);
 }
 
+.quick-button-icon,
+.sidebar-item-icon,
+.menu-toggle-icon {
+  width: 1.45rem;
+  height: 1.45rem;
+}
+
+.quick-button-icon {
+  width: 1.6rem;
+  height: 1.6rem;
+}
+
+.quick-button-icon .icon-fill,
+.sidebar-item-icon .icon-fill,
+.menu-toggle-icon .icon-fill {
+  fill: currentColor;
+  stroke: none;
+}
+
 .quick-button-label {
   color: var(--green-deep);
   font-size: 0.92rem;
@@ -1699,6 +1718,23 @@ body {
   letter-spacing: 0.04em;
 }
 
+.menu-toggle {
+  display: inline-grid;
+  place-items: center;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .sidebar-item-footer {
   border-top: 1px solid rgba(255, 255, 255, 0.16);
   padding-top: 1rem;
@@ -1733,6 +1769,18 @@ body {
 .registration-status-card {
   border: 1px solid rgba(122, 31, 36, 0.08);
   background: #faf7f5;
+}
+
+.document-viewer-shell {
+  gap: 1rem;
+}
+
+.document-viewer-frame {
+  width: 100%;
+  min-height: 72vh;
+  border: 1px solid rgba(122, 31, 36, 0.08);
+  border-radius: 1.2rem;
+  background: #f5f5f5;
 }
 
 .login-hero-shell {
@@ -1814,6 +1862,13 @@ body {
   font-weight: 800;
   letter-spacing: 0.08em;
   box-shadow: 0 18px 36px rgba(99, 27, 37, 0.18);
+}
+
+.login-brand-mark-image {
+  display: block;
+  width: clamp(4.8rem, 10vw, 6rem);
+  height: clamp(4.8rem, 10vw, 6rem);
+  object-fit: contain;
 }
 
 .login-brand-name {
@@ -1921,6 +1976,10 @@ body {
 
   .login-actions-hero > * {
     width: 100%;
+  }
+
+  .document-viewer-frame {
+    min-height: 66vh;
   }
 }
 
