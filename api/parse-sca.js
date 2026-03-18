@@ -12,17 +12,20 @@ module.exports = async function handler(request, response) {
       throw new Error("nenhum PDF foi enviado");
     }
 
-    const [{ extractScaPdfDataFromArrayBuffer }, pdfjsLib] = await Promise.all([
-      import("../sca-parser.js"),
-      import("pdfjs-dist/legacy/build/pdf.mjs"),
-    ]);
+    const parser = await import("../sca-parser.js");
+    parser.ensurePdfJsCompatibility();
+    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs");
+    parser.preparePdfJsModule(pdfjsLib, 1);
 
     const fallbackProfile = {
       displayName: decodeHeaderValue(request.headers["x-display-name"]),
       studentName: decodeHeaderValue(request.headers["x-student-name"]),
     };
 
-    const academicData = await extractScaPdfDataFromArrayBuffer(pdfBuffer, fallbackProfile, { pdfjsLib });
+    const academicData = await parser.extractScaPdfDataFromArrayBuffer(pdfBuffer, fallbackProfile, {
+      pdfjsLib,
+      pdfjsSourceIndex: 1,
+    });
 
     response.statusCode = 200;
     response.setHeader("Content-Type", "application/json; charset=utf-8");

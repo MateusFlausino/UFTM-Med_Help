@@ -17,6 +17,10 @@ const PDFJS_IMPORT_CANDIDATES = [
   "./vendor/pdfjs/pdf.mjs",
   "./node_modules/pdfjs-dist/legacy/build/pdf.mjs",
 ];
+const PDFJS_WORKER_CANDIDATES = [
+  new URL("./vendor/pdfjs/pdf.worker.mjs", import.meta.url).href,
+  new URL("./node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs", import.meta.url).href,
+];
 let pdfjsModulePromise = null;
 
 export async function extractScaPdfData(file, fallbackProfile = {}, options = {}) {
@@ -26,6 +30,7 @@ export async function extractScaPdfData(file, fallbackProfile = {}, options = {}
 
 export async function extractScaPdfDataFromArrayBuffer(buffer, fallbackProfile = {}, options = {}) {
   const pdfjsLib = options.pdfjsLib || await loadPdfJs();
+  preparePdfJsModule(pdfjsLib, options.pdfjsSourceIndex);
   const loadingTask = pdfjsLib.getDocument({
     data: toPdfBinary(buffer),
     disableWorker: true,
@@ -86,9 +91,12 @@ async function loadPdfJs() {
 }
 
 async function loadLocalPdfJs() {
-  for (const candidate of PDFJS_IMPORT_CANDIDATES) {
+  for (let index = 0; index < PDFJS_IMPORT_CANDIDATES.length; index += 1) {
+    const candidate = PDFJS_IMPORT_CANDIDATES[index];
     try {
-      return await import(candidate);
+      const module = await import(candidate);
+      preparePdfJsModule(module, index);
+      return module;
     } catch (error) {
       // tenta o próximo caminho local disponível
     }
@@ -102,7 +110,7 @@ function describeLoadError(error) {
   return message || "erro desconhecido";
 }
 
-function ensurePdfJsCompatibility() {
+export function ensurePdfJsCompatibility() {
   if (typeof globalThis.DOMMatrix !== "function") {
     globalThis.DOMMatrix = SimpleDOMMatrix;
   }
@@ -110,6 +118,21 @@ function ensurePdfJsCompatibility() {
   if (typeof globalThis.DOMMatrixReadOnly !== "function") {
     globalThis.DOMMatrixReadOnly = SimpleDOMMatrix;
   }
+}
+
+export function preparePdfJsModule(pdfjsLib, sourceIndex = 0) {
+  ensurePdfJsCompatibility();
+
+  if (!pdfjsLib?.GlobalWorkerOptions) {
+    return pdfjsLib;
+  }
+
+  const workerSrc = PDFJS_WORKER_CANDIDATES[sourceIndex] || PDFJS_WORKER_CANDIDATES[0] || "";
+  if (workerSrc && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = workerSrc;
+  }
+
+  return pdfjsLib;
 }
 
 class SimpleDOMMatrix {
