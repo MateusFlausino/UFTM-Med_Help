@@ -1631,6 +1631,12 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.2);
 }
 
+.sidebar-avatar .avatar-image {
+  width: 3.7rem;
+  height: 3.7rem;
+  border-color: rgba(255, 255, 255, 0.24);
+}
+
 .sidebar-profile strong,
 .sidebar-profile span,
 .sidebar-profile small,

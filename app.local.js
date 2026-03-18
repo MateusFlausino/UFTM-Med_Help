@@ -1130,6 +1130,10 @@ function renderShortcutCard(title, caption, action, tab) {
 }
 
 function renderAvatar(user) {
+  if (user?.photoURL) {
+    return `<img class="avatar-image" src="${escapeAttribute(user.photoURL)}" alt="${escapeAttribute(user.displayName || "Foto do aluno")}" referrerpolicy="no-referrer" loading="lazy" decoding="async" />`;
+  }
+
   return `<span class="avatar-fallback">${escape(initials(user.displayName || user.email || "Aluno"))}</span>`;
 }
 
