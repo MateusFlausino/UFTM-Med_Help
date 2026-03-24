@@ -2076,7 +2076,6 @@ function renderHomePanel(activeUpload) {
       <section class="paper-card dashboard-highlight">
         <div class="section-topline">Resumo</div>
         <h2 class="section-title">${escape(buildHeroTitle(activeUpload, academicData, todayClasses, nextClass))}</h2>
-        <p class="section-copy">${escape(buildHeroSubtitle(academicData))}</p>
         <div class="button-row" style="margin-top: 1rem;">
           <button class="secondary" data-action="${academicData ? "open-academic-tab" : "open-registration"}" ${academicData ? 'data-tab="today"' : ""}>${academicData ? "Abrir agenda" : "Finalizar cadastro"}</button>
           ${getRegistrationState().studentCardUpload ? `<button class="ghost" data-action="open-student-card">Abrir ID digital</button>` : ""}
@@ -3744,23 +3743,6 @@ function buildHeroTitle(activeUpload, academicData, todayClasses, nextClass) {
     return `${name}, sua próxima aula é ${nextClass.title} em ${nextClass.day} às ${nextClass.startTime}.`;
   }
   return `${name}, o PDF ${activeUpload.originalName} foi importado com sucesso.`;
-}
-
-function buildHeroSubtitle(academicData) {
-  if (!academicData) {
-    return "Entre na conta do aluno, envie o PDF oficial do SCA e acompanhe a agenda do DA em qualquer aparelho.";
-  }
-
-  const pieces = [
-    academicData.profile?.course,
-    academicData.profile?.period ? `período ${academicData.profile.period}` : "",
-    academicData.summary?.disciplineCount ? `${academicData.summary.disciplineCount} disciplina${academicData.summary.disciplineCount > 1 ? "s" : ""}` : "",
-    academicData.summary?.classCount ? `${academicData.summary.classCount} bloco${academicData.summary.classCount > 1 ? "s" : ""} de aula` : "",
-  ].filter(Boolean);
-
-  return pieces.length
-    ? `Dados importados do PDF do SCA: ${pieces.join(" • ")}.`
-    : "O arquivo está salvo, mas ainda não consegui extrair informações suficientes deste PDF.";
 }
 
 function getActiveUpload() {
