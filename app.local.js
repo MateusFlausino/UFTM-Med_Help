@@ -8,6 +8,7 @@ const REGISTRATION_TAB_ID = "registration";
 const DOCUMENT_VIEWER_TAB_ID = "document-viewer";
 const ADMIN_TAB_ID = "admin";
 const INFO_TAB_ID = "info";
+const SUBSCRIPTION_TAB_ID = "subscription";
 const MENU_AUTO_REFRESH_MS = 6 * 60 * 60 * 1000;
 const MENU_REFRESH_HEARTBEAT_MS = 30 * 60 * 1000;
 const CLASS_NOTIFICATION_LEAD_MINUTES = 10;
@@ -361,6 +362,7 @@ const AGENDA_NAV_ITEMS = [
 const SIDEBAR_ITEMS = [
   { id: "home", label: "Inicio", icon: "home", action: "set-main-tab", tab: "home" },
   { id: INFO_TAB_ID, label: "Informacoes", icon: "compass", action: "open-info-hub" },
+  { id: SUBSCRIPTION_TAB_ID, label: "Assinatura", icon: "star", action: "set-main-tab", tab: SUBSCRIPTION_TAB_ID },
   { id: REGISTRATION_TAB_ID, label: "Cadastro", icon: "user-plus", action: "open-registration" },
   { id: "student-card", label: "ID Digital", icon: "id-card", action: "open-student-card" },
   { id: "today", label: "Grade Horaria", icon: "calendar-day", action: "open-academic-tab", tab: "today" },
@@ -1885,6 +1887,10 @@ function renderMainPanel(activeUpload, registration = getRegistrationState()) {
     return renderInfoHubPanel();
   }
 
+  if (state.activeTab === SUBSCRIPTION_TAB_ID) {
+    return renderExpansionLinksPanel();
+  }
+
   if (!registration.isComplete) {
     return renderRegistrationPendingState(registration);
   }
@@ -1994,6 +2000,7 @@ function renderSidebarItem(item, registration) {
   const isLocked = !registration.isComplete
     && item.action !== "open-registration"
     && item.action !== "open-info-hub"
+    && item.id !== SUBSCRIPTION_TAB_ID
     && item.action !== "open-student-card"
     && item.action !== "open-admin";
 
@@ -2509,8 +2516,6 @@ function renderHomePanel(activeUpload) {
 
       ${renderAnnouncementsFeed({ excludeIds: spotlightAnnouncement ? [spotlightAnnouncement.id] : [] })}
 
-      ${renderExpansionLinksPanel()}
-
       <section class="paper-card simple-section">
         <div class="section-header-row">
           <div>
@@ -2789,18 +2794,31 @@ function renderPortalListItem(item, iconName = "badge-check") {
 
 function renderExpansionLinksPanel() {
   return `
-    <section class="paper-card simple-section">
-      <div class="section-header-row">
-        <div>
-          <div class="section-topline">Expansao</div>
-          <h2 class="section-title">Planos, checkout e ligas</h2>
+    <section class="section-stack simple-stack">
+      <section class="paper-card dashboard-highlight simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Assinatura</div>
+            <h2 class="section-title">Planos, checkout e ligas</h2>
+          </div>
+          <span class="tag">Estrutura pronta</span>
         </div>
-        <span class="tag">Estrutura pronta</span>
-      </div>
-      <p class="section-copy">A home agora ja comporta um checkout de pagamento unico, um futuro Plano Plus e um espaco simples para Ligas Academicas, apenas com links e descricoes curtas.</p>
-      <div class="link-grid" style="margin-top: 1rem;">
-        ${EXPANSION_LINKS.map(renderExpansionLinkCard).join("")}
-      </div>
+        <p class="section-copy">Esta area agora fica separada da tela inicial e concentra o espaco de assinatura, pagamento unico e acessos extras do aplicativo.</p>
+      </section>
+
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Acessos</div>
+            <h2 class="section-title">Escolha uma opcao</h2>
+          </div>
+          <span class="tag">${EXPANSION_LINKS.length} itens</span>
+        </div>
+        <p class="section-copy">Mantive aqui os cards de Plano Plus, checkout e Ligas Academicas para voce acessar pela barra lateral.</p>
+        <div class="link-grid" style="margin-top: 1rem;">
+          ${EXPANSION_LINKS.map(renderExpansionLinkCard).join("")}
+        </div>
+      </section>
     </section>
   `;
 }
@@ -3344,6 +3362,10 @@ function getScreenTitle() {
     return getInfoPage()?.title || "Informacoes";
   }
 
+  if (state.activeTab === SUBSCRIPTION_TAB_ID) {
+    return "Assinatura";
+  }
+
   if (state.activeTab === "academic") {
     const agendaTitleMap = {
       today: "Grade Horária",
@@ -3356,6 +3378,7 @@ function getScreenTitle() {
   const mainTitleMap = {
     home: "Início",
     [ADMIN_TAB_ID]: "Admin",
+    [SUBSCRIPTION_TAB_ID]: "Assinatura",
   };
 
   return mainTitleMap[state.activeTab] || APP_NAME;
@@ -3458,8 +3481,12 @@ function buildRegistrationBannerMessage(registration = getRegistrationState()) {
   return `Aguardando finalizacao do cadastro: envie ${registration.missing.join(" e ")} antes da primeira utilizacao.`;
 }
 
-function ensureAccessAfterRegistration(action) {
+function ensureAccessAfterRegistration(action, nextTab = "") {
   if (state.isAdmin) {
+    return true;
+  }
+
+  if (action === "set-main-tab" && nextTab === SUBSCRIPTION_TAB_ID) {
     return true;
   }
 
@@ -3565,7 +3592,7 @@ async function onClick(event) {
 
   if (action === "set-main-tab") {
     const nextTab = button.dataset.tab || "home";
-    if (!ensureAccessAfterRegistration(action)) {
+    if (!ensureAccessAfterRegistration(action, nextTab)) {
       return;
     }
     revokeActiveDocumentViewer();
