@@ -1,5 +1,4 @@
 import { extractScaPdfData } from "./sca-parser.js";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2?bundle";
 
 const APP_NAME = "Agenda DAGV";
 const APP_MARK = "DAGV";
@@ -160,6 +159,7 @@ let classNotificationTimerId = 0;
 let classNotificationHeartbeatId = 0;
 let menuRefreshHeartbeatId = 0;
 let scheduledReminderKey = "";
+let createSupabaseClient = null;
 
 clearPublicBootstrapData();
 
@@ -171,6 +171,8 @@ let state = {
   menu: Array.isArray(uiState.menu) && uiState.menu.length ? uiState.menu : defaultMenu,
   lastMenuSync: uiState.lastMenuSync || "",
   syncMessage: uiState.syncMessage || "Buscando o cardápio da Abadia para o painel do DA.",
+  isOnline: isNavigatorOnline(),
+  offlineAccess: false,
   supabaseReady,
   canUseGoogleAuth,
   authChecking: supabaseReady && canUseGoogleAuth,
@@ -186,7 +188,7 @@ let state = {
   documentViewer: createEmptyDocumentViewerState(),
   isAdmin: false,
   adminRole: "",
-  announcements: [],
+  announcements: Array.isArray(uiState.announcements) ? uiState.announcements.map(normalizeAdminAnnouncementRow) : [],
   announcementsLoading: false,
   announcementsError: "",
   adminLoading: false,
@@ -200,6 +202,8 @@ appElement.addEventListener("change", onChange);
 appElement.addEventListener("input", onInput);
 appElement.addEventListener("load", onLoad, true);
 document.addEventListener("visibilitychange", onVisibilityChange);
+window.addEventListener("online", onConnectivityChange);
+window.addEventListener("offline", onConnectivityChange);
 
 init().catch((error) => {
   appElement.innerHTML = renderStartupFailure(error);
@@ -211,7 +215,18 @@ async function init() {
   startMenuRefreshHeartbeat();
   refreshRuMenuIfNeeded(true);
 
+  if (!state.isOnline) {
+    const restoredOffline = await restoreOfflineSession("Modo offline ativo com os ultimos dados salvos neste aparelho.");
+    if (restoredOffline) {
+      return;
+    }
+  }
+
   if (!supabaseReady) {
+    const restoredOffline = await restoreOfflineSession("Modo offline ativo com os ultimos dados salvos neste aparelho.");
+    if (restoredOffline) {
+      return;
+    }
     setState({
       authChecking: false,
       authError: `Preencha o arquivo ${SUPABASE_CONFIG_FILE} para habilitar login Google e PDFs privados na nuvem.`,
@@ -220,6 +235,10 @@ async function init() {
   }
 
   if (!canUseGoogleAuth) {
+    const restoredOffline = await restoreOfflineSession("Modo offline ativo com os ultimos dados salvos neste aparelho.");
+    if (restoredOffline) {
+      return;
+    }
     setState({
       authChecking: false,
       authError: "Abra o app em http://localhost:4173 ou no deploy para autenticar com Google.",
@@ -228,6 +247,7 @@ async function init() {
   }
 
   try {
+    const createClient = await ensureSupabaseClientFactory();
     services.supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey, {
       auth: {
         persistSession: true,
@@ -258,6 +278,12 @@ async function init() {
     await handleSupabaseSession(sessionData.session);
     clearSensitiveUrlData();
   } catch (error) {
+    const restoredOffline = isLikelyOfflineError(error)
+      ? await restoreOfflineSession("Modo offline ativo com os ultimos dados salvos neste aparelho.")
+      : false;
+    if (restoredOffline) {
+      return;
+    }
     setState({
       authChecking: false,
       authError: `Não consegui inicializar a conta online: ${describeSupabaseError(error)}`,
@@ -265,10 +291,21 @@ async function init() {
   }
 }
 
+async function ensureSupabaseClientFactory() {
+  if (createSupabaseClient) {
+    return createSupabaseClient;
+  }
+
+  const module = await import("https://esm.sh/@supabase/supabase-js@2?bundle");
+  createSupabaseClient = module.createClient;
+  return createSupabaseClient;
+}
+
 async function handleSupabaseSession(session) {
   const user = session?.user || null;
 
   if (!user) {
+    clearSession();
     revokeActiveDocumentViewer();
     setState({
       authChecking: false,
@@ -294,12 +331,14 @@ async function handleSupabaseSession(session) {
       adminError: "",
       adminStats: createEmptyAdminStats(),
       adminDraft: createEmptyAdminDraft(),
+      offlineAccess: false,
     });
     return;
   }
 
   const userData = normalizeSupabaseUser(user);
   const configuredAdminAccess = resolveConfiguredAdminAccess(userData);
+  saveSession(userData);
 
   setState({
     authChecking: false,
@@ -357,13 +396,14 @@ async function handleSupabaseSession(session) {
       announcements: announcementsResult.items,
       announcementsLoading: false,
       announcementsError: announcementsResult.error,
-      adminLoading: false,
-      adminError: "",
-      adminStats: createEmptyAdminStats(),
-      studentCardUrlDraft: getStudentCardLinkUrl(getPrimaryStudentCardUploadFromUploads(uploads)),
+    adminLoading: false,
+    adminError: "",
+    adminStats: createEmptyAdminStats(),
+    studentCardUrlDraft: getStudentCardLinkUrl(getPrimaryStudentCardUploadFromUploads(uploads)),
       activeTab: registrationComplete || resolvedAdminAccess.isAdmin ? nextActiveTab : REGISTRATION_TAB_ID,
       agendaTab: registrationComplete ? state.agendaTab : "today",
       uploadError: "",
+      offlineAccess: false,
       uploadMessage: uploads.length
         ? registrationComplete
           ? "Conta conectada. Seus documentos privados foram sincronizados."
@@ -371,12 +411,20 @@ async function handleSupabaseSession(session) {
         : "Conta conectada. Envie a grade horaria e o link da carteirinha estudantil para liberar o painel.",
     });
 
+    saveStoredProfile(profile);
+    void cacheUploadsForOffline(uploads);
     void syncUserPreferences();
     void maybeShowMenuNotification(state.menu[0] || null);
     if (resolvedAdminAccess.isAdmin) {
       void refreshAdminDashboard(true);
     }
   } catch (error) {
+    const restoredOffline = isLikelyOfflineError(error)
+      ? await restoreOfflineSession("Modo offline ativo com os ultimos dados salvos neste aparelho.")
+      : false;
+    if (restoredOffline) {
+      return;
+    }
     setState({
       authChecking: false,
       uploadError: `Não consegui sincronizar o perfil do aluno: ${describeSupabaseError(error)}`,
@@ -469,8 +517,11 @@ async function reloadRemoteAccountData(userUid) {
     referenceDate: academicData?.schedule?.length
       ? suggestReferenceDate(academicData.schedule, state.referenceDate)
       : state.referenceDate,
+    offlineAccess: false,
   });
 
+  saveStoredProfile(profile);
+  await cacheUploadsForOffline(uploads);
   return { profile, uploads };
 }
 
@@ -1399,6 +1450,92 @@ function onVisibilityChange() {
   syncClassNotifications();
 }
 
+function onConnectivityChange() {
+  const isOnline = isNavigatorOnline();
+
+  setState({
+    isOnline,
+    syncMessage: isOnline
+      ? (state.offlineAccess ? "Conexao restabelecida. Recarregue o app para sincronizar os dados mais recentes." : state.syncMessage)
+      : "Modo offline ativo com os ultimos dados salvos neste aparelho.",
+  });
+
+  if (!isOnline) {
+    if (!state.user) {
+      void restoreOfflineSession("Modo offline ativo com os ultimos dados salvos neste aparelho.");
+    }
+    return;
+  }
+
+  if (state.user && !state.offlineAccess) {
+    refreshRuMenuIfNeeded(true);
+  }
+}
+
+function isNavigatorOnline() {
+  return typeof navigator === "undefined" || navigator.onLine !== false;
+}
+
+function isLikelyOfflineError(error) {
+  const message = String(error?.message || error || "").toLowerCase();
+  return !isNavigatorOnline()
+    || message.includes("network")
+    || message.includes("fetch")
+    || message.includes("failed to fetch")
+    || message.includes("load failed")
+    || message.includes("offline");
+}
+
+async function restoreOfflineSession(message = "") {
+  const cachedUser = loadSession();
+  if (!cachedUser?.uid) {
+    return false;
+  }
+
+  const cachedProfile = loadStoredProfile(cachedUser.uid) || ensureStoredProfile(cachedUser);
+  let cachedUploads = [];
+
+  try {
+    cachedUploads = await listUploadsForUser(cachedUser.uid);
+  } catch (error) {
+    cachedUploads = [];
+  }
+
+  const profile = ensureActiveUploadProfile(cachedProfile, cachedUploads);
+  const registrationComplete = hasCompletedRegistration(cachedUploads, profile);
+  const nextActiveTab = state.activeTab === ADMIN_TAB_ID ? "home" : state.activeTab;
+  const activeUpload = cachedUploads.find((item) => item.id === profile.activeUploadId)
+    || cachedUploads.find((item) => item.documentType !== DOCUMENT_TYPES.studentCard)
+    || null;
+  const studentCardUpload = getPrimaryStudentCardUploadFromUploads(cachedUploads);
+
+  setState({
+    authChecking: false,
+    authError: "",
+    user: cachedUser,
+    profile,
+    uploads: cachedUploads,
+    studentCardUrlDraft: getStudentCardLinkUrl(studentCardUpload),
+    activeTab: registrationComplete ? nextActiveTab : REGISTRATION_TAB_ID,
+    agendaTab: registrationComplete ? state.agendaTab : "today",
+    referenceDate: activeUpload?.academicData?.schedule?.length
+      ? suggestReferenceDate(activeUpload.academicData.schedule, state.referenceDate)
+      : state.referenceDate,
+    isAdmin: false,
+    adminRole: "",
+    adminLoading: false,
+    adminError: "",
+    adminStats: createEmptyAdminStats(),
+    offlineAccess: true,
+    isOnline: false,
+    uploadMessage: "",
+    uploadError: "",
+    syncMessage: message || "Modo offline ativo com os ultimos dados salvos neste aparelho.",
+  });
+
+  return true;
+}
+
 function syncStudentCardStageRatio() {
   const image = appElement.querySelector(".student-card-image");
   if (!(image instanceof HTMLImageElement) || !image.complete) {
@@ -1421,11 +1558,13 @@ function applyStudentCardStageRatio(image) {
 }
 
 function renderLogin() {
-  const canLogin = !state.authChecking && state.supabaseReady && state.canUseGoogleAuth;
+  const canLogin = !state.authChecking && state.supabaseReady && state.canUseGoogleAuth && state.isOnline;
   const loginLabel = state.authChecking ? "Conectando..." : "Entrar com Google";
   const supportMessage = state.authError
     || (!state.supabaseReady
       ? "O acesso online ainda está sendo preparado para este ambiente."
+      : !state.isOnline
+        ? "Sem internet agora. Entre online uma vez neste aparelho para liberar o modo offline basico."
       : !state.canUseGoogleAuth
         ? "Abra o app pelo navegador para continuar com o login."
         : "Entre com sua conta Google para começar.")
@@ -2593,6 +2732,7 @@ function getScreenTitle() {
 function renderStatusBanner(registration = getRegistrationState()) {
   const message = state.uploadError
     || state.authError
+    || (!state.isOnline && state.user ? "Modo offline ativo. Exibindo os ultimos dados salvos neste aparelho." : "")
     || (!registration.isComplete ? buildRegistrationBannerMessage(registration) : "");
   if (!message) {
     return "";
@@ -2601,6 +2741,8 @@ function renderStatusBanner(registration = getRegistrationState()) {
   const classes = ["toast", "compact-toast"];
   if (state.uploadError || state.authError) {
     classes.push("is-danger");
+  } else if (!state.isOnline && state.user) {
+    classes.push("is-warning");
   } else if (!registration.isComplete) {
     classes.push("is-warning");
   }
@@ -2924,11 +3066,41 @@ function onChange(event) {
 }
 
 async function logout() {
-  if (!services.supabase) return;
+  if (!services.supabase) {
+    revokeActiveDocumentViewer();
+    stopUserSubscriptions();
+    clearSession();
+    setState({
+      authChecking: false,
+      authError: "",
+      uploadError: "",
+      uploadMessage: "",
+      uploadProgress: 0,
+      openingUploadId: "",
+      studentCardUrlDraft: "",
+      activeTab: "home",
+      agendaTab: "today",
+      sidebarOpen: false,
+      documentViewer: createEmptyDocumentViewerState(),
+      user: null,
+      profile: null,
+      uploads: [],
+      isAdmin: false,
+      adminRole: "",
+      adminStats: createEmptyAdminStats(),
+      adminDraft: createEmptyAdminDraft(),
+      offlineAccess: false,
+      syncMessage: state.isOnline
+        ? "Sessão encerrada. Entre novamente para acessar seus PDFs."
+        : "Modo offline encerrado neste aparelho.",
+    });
+    return;
+  }
 
   try {
     revokeActiveDocumentViewer();
     stopUserSubscriptions();
+    clearSession();
     const { error } = await services.supabase.auth.signOut();
     if (error) {
       throw error;
@@ -3067,6 +3239,24 @@ async function uploadScheduleDocument(file, inputElement) {
       displayName: state.user.displayName,
       studentName: state.user.displayName,
     });
+    const localUploadSnapshot = {
+      id: uploadId,
+      ownerUid: state.user.uid,
+      originalName: file.name,
+      normalizedName,
+      storagePath,
+      size: file.size,
+      contentType: file.type || "application/pdf",
+      status: "processed",
+      parserStatus: "parsed_locally",
+      uploadedAtClient,
+      updatedAt: uploadedAtClient,
+      notes: "PDF salvo localmente neste aparelho para acesso offline basico.",
+      academicData,
+      documentType: DOCUMENT_TYPES.schedule,
+    };
+
+    await cacheUploadForOffline(localUploadSnapshot, file);
 
     setState({
       uploadProgress: 56,
@@ -3215,6 +3405,25 @@ async function saveStudentCardLink() {
   });
 
   try {
+    const localUploadSnapshot = {
+      id: uploadId,
+      ownerUid: state.user.uid,
+      originalName: "Carteirinha virtual UFTM",
+      normalizedName: "id-digital-link",
+      storagePath,
+      size: 0,
+      contentType: "text/uri-list",
+      status: "linked",
+      parserStatus: "student_card_link",
+      uploadedAtClient,
+      updatedAt: uploadedAtClient,
+      notes: studentCardUrl,
+      academicData: null,
+      documentType: DOCUMENT_TYPES.studentCard,
+    };
+
+    await cacheUploadForOffline(localUploadSnapshot);
+
     await upsertUploadRow({
       id: uploadId,
       ownerUid: state.user.uid,
@@ -3536,7 +3745,16 @@ async function openUpload(uploadId, options = {}) {
   if (!uploadId) return;
   const inline = options.inline !== false;
   const record = state.uploads.find((item) => item.id === uploadId);
-  if (!record || !record.storagePath || !services.supabase) {
+  let localRecord = null;
+
+  try {
+    localRecord = await getUploadRecord(uploadId);
+  } catch (error) {
+    localRecord = null;
+  }
+
+  const resolvedRecord = record || localRecord;
+  if (!resolvedRecord) {
     setState({
       uploadError: "Não consegui localizar este documento agora.",
       uploadMessage: "",
@@ -3553,7 +3771,7 @@ async function openUpload(uploadId, options = {}) {
     : state.agendaTab;
 
   revokeActiveDocumentViewer();
-  if (inline && record.documentType === DOCUMENT_TYPES.studentCard) {
+  if (inline && resolvedRecord.documentType === DOCUMENT_TYPES.studentCard) {
     void enterStudentCardImmersiveMode();
   }
   setState({
@@ -3564,10 +3782,10 @@ async function openUpload(uploadId, options = {}) {
     documentViewer: inline
       ? {
           uploadId,
-          title: record.originalName,
+          title: resolvedRecord.originalName,
           objectUrl: "",
           externalUrl: "",
-          documentType: record.documentType,
+          documentType: resolvedRecord.documentType,
           sourceTab,
           sourceAgendaTab,
           loading: true,
@@ -3576,10 +3794,14 @@ async function openUpload(uploadId, options = {}) {
   });
 
   try {
-    if (isStudentCardLinkUpload(record)) {
-      const externalUrl = getStudentCardLinkUrl(record);
+    if (isStudentCardLinkUpload(resolvedRecord)) {
+      const externalUrl = getStudentCardLinkUrl(resolvedRecord);
       if (!externalUrl) {
         throw new Error("nao encontrei o link oficial da carteirinha");
+      }
+
+      if (!state.isOnline) {
+        throw new Error("o id digital precisa de internet para abrir o link oficial");
       }
 
       if (!inline) {
@@ -3597,10 +3819,10 @@ async function openUpload(uploadId, options = {}) {
         activeTab: DOCUMENT_VIEWER_TAB_ID,
         documentViewer: {
           uploadId,
-          title: record.originalName,
+          title: resolvedRecord.originalName,
           objectUrl: preparedSource.objectUrl,
           externalUrl: preparedSource.externalUrl,
-          documentType: record.documentType,
+          documentType: resolvedRecord.documentType,
           sourceTab,
           sourceAgendaTab,
           loading: false,
@@ -3609,10 +3831,36 @@ async function openUpload(uploadId, options = {}) {
       return;
     }
 
+    if ((!services.supabase || !state.isOnline) && localRecord?.blob) {
+      const objectUrl = URL.createObjectURL(localRecord.blob);
+
+      setState({
+        openingUploadId: "",
+        uploadMessage: `${resolvedRecord.originalName} carregado do armazenamento offline.`,
+        uploadError: "",
+        activeTab: DOCUMENT_VIEWER_TAB_ID,
+        documentViewer: {
+          uploadId,
+          title: resolvedRecord.originalName,
+          objectUrl,
+          externalUrl: "",
+          documentType: resolvedRecord.documentType,
+          sourceTab,
+          sourceAgendaTab,
+          loading: false,
+        },
+      });
+      return;
+    }
+
+    if (!services.supabase || !state.isOnline) {
+      throw new Error("este documento ainda nao foi salvo localmente neste aparelho");
+    }
+
     const { data, error } = await services.supabase
       .storage
       .from(getSupabaseBucketName())
-      .createSignedUrl(record.storagePath, 300);
+      .createSignedUrl(resolvedRecord.storagePath, 300);
 
     if (error || !data?.signedUrl) {
       throw error || new Error("não consegui criar um link temporário para este PDF");
@@ -3620,7 +3868,7 @@ async function openUpload(uploadId, options = {}) {
 
     if (!inline) {
       window.open(data.signedUrl, "_blank", "noopener");
-      setState({ openingUploadId: "", uploadMessage: `${record.originalName} aberto em nova aba.`, uploadError: "" });
+      setState({ openingUploadId: "", uploadMessage: `${resolvedRecord.originalName} aberto em nova aba.`, uploadError: "" });
       return;
     }
 
@@ -3636,20 +3884,24 @@ async function openUpload(uploadId, options = {}) {
 
     const pdfBlob = await response.blob();
     const objectUrl = URL.createObjectURL(pdfBlob);
+    await cacheUploadForOffline({
+      ...resolvedRecord,
+      updatedAt: new Date().toISOString(),
+    }, pdfBlob);
 
     setState({
       openingUploadId: "",
-      uploadMessage: record.documentType === DOCUMENT_TYPES.studentCard
+      uploadMessage: resolvedRecord.documentType === DOCUMENT_TYPES.studentCard
         ? "ID digital carregado dentro do app."
-        : `${record.originalName} carregado dentro do app.`,
+        : `${resolvedRecord.originalName} carregado dentro do app.`,
       uploadError: "",
       activeTab: DOCUMENT_VIEWER_TAB_ID,
       documentViewer: {
         uploadId,
-        title: record.originalName,
+        title: resolvedRecord.originalName,
         objectUrl,
         externalUrl: "",
-        documentType: record.documentType,
+        documentType: resolvedRecord.documentType,
         sourceTab,
         sourceAgendaTab,
         loading: false,
@@ -4503,6 +4755,10 @@ function persistUiState() {
       agendaTab: state.agendaTab,
       sidebarOpen: state.sidebarOpen,
       referenceDate: state.referenceDate,
+      menu: state.menu,
+      lastMenuSync: state.lastMenuSync,
+      syncMessage: state.syncMessage,
+      announcements: state.announcements,
     }),
   );
 }
@@ -4597,6 +4853,24 @@ function ensureActiveUploadProfile(profile, uploads) {
 function saveStoredProfile(profile) {
   localStorage.setItem(profileStorageKey(profile.uid), JSON.stringify(profile));
   return profile;
+}
+
+async function cacheUploadsForOffline(uploads = []) {
+  for (const upload of uploads) {
+    try {
+      await saveUploadRecord(upload);
+    } catch (error) {
+      // Mantemos o fluxo online mesmo sem conseguir espelhar no cache local.
+    }
+  }
+}
+
+async function cacheUploadForOffline(upload, blob) {
+  try {
+    await saveUploadRecord(blob ? { ...upload, blob } : upload);
+  } catch (error) {
+    // Falhas no cache local não devem impedir o restante do fluxo.
+  }
 }
 
 function openLocalDb() {
