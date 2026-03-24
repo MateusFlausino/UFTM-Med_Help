@@ -7,6 +7,7 @@ const SUPABASE_BUCKET = "student-pdfs";
 const REGISTRATION_TAB_ID = "registration";
 const DOCUMENT_VIEWER_TAB_ID = "document-viewer";
 const ADMIN_TAB_ID = "admin";
+const INFO_TAB_ID = "info";
 const MENU_AUTO_REFRESH_MS = 6 * 60 * 60 * 1000;
 const MENU_REFRESH_HEARTBEAT_MS = 30 * 60 * 1000;
 const CLASS_NOTIFICATION_LEAD_MINUTES = 10;
@@ -102,13 +103,174 @@ const ANNOUNCEMENT_HOME_SECTIONS = [
     ],
   },
 ];
+const INFO_PAGES = [
+  {
+    id: "denem",
+    title: "DENEM",
+    icon: "megaphone",
+    badge: "Regional Sudeste-2",
+    description: "Representacao nacional dos estudantes de Medicina com articulacao para alem da UFTM.",
+    summary: "A pagina do DAGV apresenta a DENEM como a executiva que conecta os estudantes de Medicina em nivel nacional e leva pautas de educacao medica, SUS e mobilizacao estudantil.",
+    hint: "Abrir resumo da DENEM",
+    sections: [
+      {
+        kicker: "O que e",
+        title: "Movimento estudantil em escala nacional",
+        paragraphs: [
+          "O DAGV mostra que a participacao estudantil da Medicina nao se limita ao campus e se conecta a uma rede nacional de representacao.",
+          "Dentro dessa estrutura, a UFTM aparece vinculada a Regional Sudeste-2.",
+        ],
+      },
+      {
+        kicker: "Como funciona",
+        title: "Organizacao por regionais e coordenacoes",
+        bullets: [
+          "A DENEM se divide em 8 regionais para aproximar a entidade nacional das coordenacoes locais.",
+          "A coordenacao nacional reune sede, regionais e a articulacao de relacoes exteriores.",
+          "O CENEPES agrega frentes como politicas de saude, educacao, extensao e cultura/meio ambiente.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "dce-uftm",
+    title: "DCE UFTM",
+    icon: "building",
+    badge: "Representacao estudantil",
+    description: "Resumo interno sobre o papel do DCE como instancia maxima de representacao da UFTM.",
+    summary: "A pagina define o DCE-WAC como o espaco central de representacao estudantil da UFTM e contextualiza o legado de Walkiria Afonso Costa no movimento estudantil.",
+    hint: "Abrir resumo do DCE",
+    sections: [
+      {
+        kicker: "O que e",
+        title: "Instancia maxima de representacao",
+        paragraphs: [
+          "Segundo o texto do DAGV, o DCE organiza debates, pautas e lutas do corpo discente dentro da universidade.",
+          "A proposta do espaco e ser democratico e aberto a disputas de interesse da categoria estudantil.",
+        ],
+      },
+      {
+        kicker: "Na UFTM",
+        title: "Como a entidade aparece localmente",
+        bullets: [
+          "O DCE-WAC representa estudantes de graduacao, pos-graduacao e ensino tecnico da UFTM.",
+          "A pagina destaca que a entidade nao possui filiacao politico-partidaria ou religiosa.",
+          "O estatuto citado no texto foi aprovado em assembleia e organiza o funcionamento institucional da entidade.",
+        ],
+      },
+      {
+        kicker: "Memoria",
+        title: "Walkiria Afonso Costa",
+        paragraphs: [
+          "O DAGV recupera a trajetoria de Walkiria como simbolo de luta estudantil, organizacao politica e compromisso com a educacao publica.",
+          "Esse resgate ajuda a explicar o nome do DCE e a memoria politica que a entidade carrega na UFTM.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "cvu-uberaba",
+    title: "CVU Uberaba",
+    icon: "map-pin",
+    badge: "Em atualizacao",
+    description: "Espaco interno reservado para o CVU Uberaba no mesmo padrao do restante do app.",
+    summary: "Na publicacao atual do DAGV, a pagina do CVU Uberaba aparece apenas com o titulo, sem texto explicativo. Mantive esse bloco pronto para receber conteudo quando ele for publicado.",
+    hint: "Abrir status do CVU",
+    notice: "Resumo interno montado a partir do que esta publicado hoje no DAGV. Assim que a pagina ganhar conteudo, podemos preencher esta area com mais detalhes.",
+    sections: [
+      {
+        kicker: "Situacao atual",
+        title: "Pagina ainda sem descricao",
+        paragraphs: [
+          "Hoje o site do DAGV exibe o nome CVU Uberaba, mas sem texto complementar dentro da propria pagina.",
+          "Por isso, o app mostra um espaco nativo pronto para crescer sem depender de redirecionamento externo.",
+        ],
+      },
+      {
+        kicker: "Espaco pronto",
+        title: "O que pode entrar aqui depois",
+        bullets: [
+          "Resumo do projeto ou servico ligado ao CVU Uberaba.",
+          "Rotina de funcionamento, calendario e pontos de contato.",
+          "Orientacoes praticas para estudantes que precisem dessa referencia.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "cepop-uftm",
+    title: "CEPOP UFTM",
+    icon: "book-open",
+    badge: "Extensao e acesso",
+    description: "Visao interna do cursinho de educacao popular da UFTM voltado a egressos de escola publica.",
+    summary: "A pagina apresenta o CEPOP como uma iniciativa de democratizacao do acesso ao ensino superior, com aulas de varias disciplinas e foco na preparacao para processos seletivos, em especial o ENEM.",
+    hint: "Abrir resumo do CEPOP",
+    sections: [
+      {
+        kicker: "O que e",
+        title: "Cursinho de educacao popular",
+        paragraphs: [
+          "O texto relaciona o CEPOP a politica de inclusao estudantil e ampliacao do acesso a educacao superior.",
+          "A proposta e atender uma demanda de Uberaba e regiao com foco em egressos do ensino medio de escolas publicas.",
+        ],
+      },
+      {
+        kicker: "Como funciona",
+        title: "Equipe e disciplinas",
+        bullets: [
+          "O projeto seleciona academicos da UFTM para ministrar aulas de disciplinas do ensino medio.",
+          "Tambem existem vagas de apoio para gestao pedagogica, administrativa e comunicacao.",
+          "O objetivo central e preparar estudantes para processos seletivos competitivos, com destaque para o ENEM.",
+        ],
+      },
+      {
+        kicker: "Publico e contato",
+        title: "Recorte apresentado pelo DAGV",
+        bullets: [
+          "Publico-alvo: 70 pessoas que concluiram o ensino medio em escolas publicas.",
+          "Local citado: CEFORES, Av. Getulio Guarita, 159, Centro Educacional da UFTM, Uberaba-MG.",
+          "Telefones: (34) 3700-6998 / 6999.",
+          "Contato informado: sec.cefores@uftm.edu.br.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "exigencias-horarias",
+    title: "Exigencias Horarias",
+    icon: "hourglass",
+    badge: "Curriculo em revisao",
+    description: "Area interna dedicada a explicar como a carga horaria do curso sera organizada.",
+    summary: "A propria pagina informa que a carga horaria do curso de Medicina esta em processo de reelaboracao. Por enquanto, o status exibido e de conteudo em preparacao.",
+    hint: "Abrir status da matriz",
+    sections: [
+      {
+        kicker: "Status atual",
+        title: "Conteudo ainda em preparacao",
+        paragraphs: [
+          "No DAGV, a secao aparece como um aviso de que a composicao da carga horaria esta sendo revista.",
+          "O material completo ainda nao foi publicado e a orientacao atual e aguardar.",
+        ],
+      },
+      {
+        kicker: "Uso futuro",
+        title: "Espaco pronto para receber a matriz",
+        bullets: [
+          "Distribuicao de carga horaria por eixo ou periodo.",
+          "Regras e exigencias minimas do curso.",
+          "Resumo rapido para consulta sem sair do app.",
+        ],
+      },
+    ],
+  },
+];
 const EXPANSION_LINKS = [
   {
     id: "one-time-payment",
     title: "Pagamento unico",
     description: "Espaco reservado para um checkout simples de compra avulsa ou acesso individual.",
     href: "#pagamento-unico",
-    hint: "Substituir pelo link do checkout",
+    hint: "Espaco pronto para checkout",
     badge: "Monetizacao",
   },
   {
@@ -116,7 +278,7 @@ const EXPANSION_LINKS = [
     title: "Plano Plus",
     description: "Area pronta para um futuro plano com beneficios extras, recursos premium e upgrades.",
     href: "#plano-plus",
-    hint: "Substituir pelo link do Plus",
+    hint: "Espaco pronto para assinatura",
     badge: "Plus",
   },
   {
@@ -124,7 +286,7 @@ const EXPANSION_LINKS = [
     title: "Ligas Academicas",
     description: "Espaco para concentrar links simples, descricoes curtas e acessos rapidos das ligas.",
     href: "#ligas-academicas",
-    hint: "Substituir pelo portal das ligas",
+    hint: "Espaco pronto para listar ligas",
     badge: "Comunidade",
   },
 ];
@@ -145,6 +307,7 @@ const AGENDA_NAV_ITEMS = [
 
 const SIDEBAR_ITEMS = [
   { id: "home", label: "Inicio", icon: "home", action: "set-main-tab", tab: "home" },
+  { id: INFO_TAB_ID, label: "Informacoes", icon: "compass", action: "open-info-hub" },
   { id: REGISTRATION_TAB_ID, label: "Cadastro", icon: "user-plus", action: "open-registration" },
   { id: "student-card", label: "ID Digital", icon: "id-card", action: "open-student-card" },
   { id: "today", label: "Grade Horaria", icon: "calendar-day", action: "open-academic-tab", tab: "today" },
@@ -191,6 +354,7 @@ clearPublicBootstrapData();
 
 let state = {
   activeTab: uiState.activeTab || "home",
+  infoPageId: uiState.infoPageId || "",
   agendaTab: uiState.agendaTab || "today",
   sidebarOpen: Boolean(uiState.sidebarOpen),
   referenceDate: uiState.referenceDate || toISO(new Date()),
@@ -1651,6 +1815,10 @@ function renderMainPanel(activeUpload, registration = getRegistrationState()) {
     return renderRegistrationPanel(registration);
   }
 
+  if (state.activeTab === INFO_TAB_ID) {
+    return renderInfoHubPanel();
+  }
+
   if (!registration.isComplete) {
     return renderRegistrationPendingState(registration);
   }
@@ -1759,6 +1927,7 @@ function renderSidebarItem(item, registration) {
     || isViewerStudentCard;
   const isLocked = !registration.isComplete
     && item.action !== "open-registration"
+    && item.action !== "open-info-hub"
     && item.action !== "open-student-card"
     && item.action !== "open-admin";
 
@@ -2253,12 +2422,15 @@ function renderHomePanel(activeUpload) {
         ${renderHomeShortcut("calendar-day", "Hoje", "open-academic-tab", "today")}
         ${renderHomeShortcut("utensils", "RU", "open-academic-tab", "menu")}
         ${renderHomeShortcut("calendar-grid", "Semana", "open-academic-tab", "week")}
+        ${renderHomeShortcut("compass", "Infos", "open-info-hub", "")}
         ${renderHomeShortcut("user-plus", "Cadastro", "open-registration", "")}
         ${getRegistrationState().studentCardUpload ? renderHomeShortcut("id-card", "ID Digital", "open-student-card", "") : ""}
         ${state.isAdmin ? renderHomeShortcut("shield", "Admin", "open-admin", "") : ""}
       </section>
 
       ${renderNotificationPanel(activeUpload)}
+
+      ${renderInfoHubHomePanel()}
 
       ${renderAnnouncementsFeed({ excludeIds: spotlightAnnouncement ? [spotlightAnnouncement.id] : [] })}
 
@@ -2338,6 +2510,122 @@ function renderNotificationPanel(activeUpload) {
   `;
 }
 
+function renderInfoHubHomePanel() {
+  return `
+    <section class="paper-card simple-section">
+      <div class="section-header-row">
+        <div>
+          <div class="section-topline">Informacoes do DAGV</div>
+          <h2 class="section-title">Entidades e projetos do curso</h2>
+        </div>
+        <button class="ghost" data-action="open-info-hub">Abrir area</button>
+      </div>
+      <p class="section-copy">Resumo interno de entidades, projetos e referencias do curso, agora dentro do app e sem redirecionamento estranho para fora.</p>
+      <div class="link-grid" style="margin-top: 1rem;">
+        ${INFO_PAGES.map(renderInfoHubCard).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderInfoHubPanel() {
+  const currentPage = getInfoPage();
+  if (currentPage) {
+    return renderInfoPage(currentPage);
+  }
+
+  return `
+    <section class="section-stack simple-stack">
+      <section class="paper-card dashboard-highlight">
+        <div class="section-topline">Informacoes</div>
+        <h2 class="section-title">Guia interno do DAGV</h2>
+        <p class="section-copy">Esta area reorganiza o conteudo do hub de informacoes do DAGV dentro do app, com leitura nativa, icones proprios e fluxo interno.</p>
+      </section>
+
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Conteudos ativos</div>
+            <h2 class="section-title">Escolha uma area</h2>
+          </div>
+          <span class="tag">${INFO_PAGES.length} guias</span>
+        </div>
+        <p class="section-copy">Cada card abre um resumo interno com as informacoes publicadas hoje pelo DAGV.</p>
+        <div class="link-grid" style="margin-top: 1rem;">
+          ${INFO_PAGES.map(renderInfoHubCard).join("")}
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function renderInfoHubCard(item) {
+  return `
+    <button class="paper-card feature-card link-card link-card-button info-card-button" data-action="open-info-page" data-page-id="${escapeAttribute(item.id)}">
+      <div class="link-card-top info-card-top">
+        <span class="tag">${escape(item.badge)}</span>
+        <span class="info-card-mark">${renderUiIcon(item.icon, "info-card-icon")}</span>
+      </div>
+      <div>
+        <h3 class="schedule-title">${escape(item.title)}</h3>
+        <p class="section-copy">${escape(item.description)}</p>
+      </div>
+      <span class="link-hint">${escape(item.hint || "Abrir resumo interno")}</span>
+    </button>
+  `;
+}
+
+function renderInfoPage(page) {
+  return `
+    <section class="section-stack simple-stack">
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Informacoes do DAGV</div>
+            <h2 class="section-title">${escape(page.title)}</h2>
+          </div>
+          <button class="ghost" data-action="back-info-hub">Voltar</button>
+        </div>
+        <div class="info-detail-hero">
+          <div class="info-detail-mark">${renderUiIcon(page.icon, "info-detail-icon")}</div>
+          <div class="info-detail-copy">
+            <div class="item-meta">
+              <span class="tag">${escape(page.badge)}</span>
+            </div>
+            <p class="section-copy">${escape(page.description)}</p>
+            <p class="portal-paragraph">${escape(page.summary)}</p>
+          </div>
+        </div>
+      </section>
+
+      ${(page.sections || []).map(renderInfoPageSection).join("")}
+
+      ${page.notice ? `
+        <section class="paper-card simple-section">
+          <div class="empty-state">${escape(page.notice)}</div>
+        </section>
+      ` : ""}
+    </section>
+  `;
+}
+
+function renderInfoPageSection(section) {
+  return `
+    <section class="paper-card simple-section">
+      <div class="section-topline">${escape(section.kicker || "Detalhe")}</div>
+      <h3 class="portal-heading">${escape(section.title)}</h3>
+      <div class="portal-blocks" style="margin-top: 1rem;">
+        ${(section.paragraphs || []).map((paragraph) => `<p class="portal-paragraph">${escape(paragraph)}</p>`).join("")}
+        ${(section.bullets || []).map((item) => `<div class="portal-list-item">${escape(item)}</div>`).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function getInfoPage(pageId = state.infoPageId) {
+  return INFO_PAGES.find((item) => item.id === pageId) || null;
+}
+
 function renderExpansionLinksPanel() {
   return `
     <section class="paper-card simple-section">
@@ -2358,7 +2646,7 @@ function renderExpansionLinksPanel() {
 
 function renderExpansionLinkCard(item) {
   return `
-    <a class="paper-card feature-card link-card" href="${escapeAttribute(item.href)}">
+    <article class="paper-card feature-card link-card">
       <div class="link-card-top">
         <span class="tag">${escape(item.badge)}</span>
       </div>
@@ -2367,7 +2655,7 @@ function renderExpansionLinkCard(item) {
         <p class="section-copy">${escape(item.description)}</p>
       </div>
       <span class="link-hint">${escape(item.hint)}</span>
-    </a>
+    </article>
   `;
 }
 
@@ -2725,6 +3013,38 @@ function renderUiIcon(iconName, className = "ui-icon") {
       <path d="M12.5 12h4.5"></path>
       <path d="M6.5 15h10.5"></path>
     `,
+    compass: `
+      <circle cx="12" cy="12" r="8"></circle>
+      <path d="m14.8 9.2-5.2 2 2.1 5.2 5.1-2.1-2-5.1Z"></path>
+      <path d="m11.8 12.2 5-5"></path>
+    `,
+    megaphone: `
+      <path d="M5 11h3l7-4v10l-7-4H5z"></path>
+      <path d="M8 15v2.5a2 2 0 0 0 4 0V17"></path>
+      <path d="M18 9.5a4 4 0 0 1 0 5"></path>
+    `,
+    building: `
+      <path d="M4 20h16"></path>
+      <path d="M6 20V8.5"></path>
+      <path d="M10 20V8.5"></path>
+      <path d="M14 20V8.5"></path>
+      <path d="M18 20V8.5"></path>
+      <path d="M4 8.5 12 4l8 4.5"></path>
+    `,
+    "map-pin": `
+      <path d="M12 21s-5-4.7-5-9a5 5 0 1 1 10 0c0 4.3-5 9-5 9Z"></path>
+      <circle cx="12" cy="12" r="1.9" class="icon-fill"></circle>
+    `,
+    "book-open": `
+      <path d="M4 6.5C4 5.7 4.7 5 5.5 5H10c1.2 0 2 .8 2 2v12c0-1.2-.8-2-2-2H5.5A1.5 1.5 0 0 0 4 18.5z"></path>
+      <path d="M20 6.5C20 5.7 19.3 5 18.5 5H14c-1.2 0-2 .8-2 2v12c0-1.2.8-2 2-2h4.5c.8 0 1.5.7 1.5 1.5z"></path>
+    `,
+    hourglass: `
+      <path d="M7 4h10"></path>
+      <path d="M7 20h10"></path>
+      <path d="M8 4c0 3 2 4.5 4 6 2-1.5 4-3 4-6"></path>
+      <path d="M8 20c0-3 2-4.5 4-6 2 1.5 4 3 4 6"></path>
+    `,
     link: `
       <path d="M10 14 14 10"></path>
       <path d="M7.5 16.5l-1 1a3 3 0 0 1-4.2-4.2l3-3a3 3 0 0 1 4.2 0"></path>
@@ -2771,6 +3091,10 @@ function getScreenTitle() {
 
   if (state.activeTab === ADMIN_TAB_ID) {
     return "Admin";
+  }
+
+  if (state.activeTab === INFO_TAB_ID) {
+    return getInfoPage()?.title || "Informacoes";
   }
 
   if (state.activeTab === "academic") {
@@ -2940,6 +3264,7 @@ async function onClick(event) {
     revokeActiveDocumentViewer();
     setState({
       activeTab: ADMIN_TAB_ID,
+      infoPageId: "",
       sidebarOpen: false,
       documentViewer: createEmptyDocumentViewerState(),
       uploadError: "",
@@ -2951,6 +3276,42 @@ async function onClick(event) {
     return;
   }
 
+  if (action === "open-info-hub") {
+    revokeActiveDocumentViewer();
+    setState({
+      activeTab: INFO_TAB_ID,
+      infoPageId: "",
+      sidebarOpen: false,
+      documentViewer: createEmptyDocumentViewerState(),
+      uploadError: "",
+      uploadMessage: "",
+    });
+    return;
+  }
+
+  if (action === "open-info-page") {
+    revokeActiveDocumentViewer();
+    setState({
+      activeTab: INFO_TAB_ID,
+      infoPageId: button.dataset.pageId || "",
+      sidebarOpen: false,
+      documentViewer: createEmptyDocumentViewerState(),
+      uploadError: "",
+      uploadMessage: "",
+    });
+    return;
+  }
+
+  if (action === "back-info-hub") {
+    setState({
+      activeTab: INFO_TAB_ID,
+      infoPageId: "",
+      sidebarOpen: false,
+      documentViewer: createEmptyDocumentViewerState(),
+    });
+    return;
+  }
+
   if (action === "set-main-tab") {
     const nextTab = button.dataset.tab || "home";
     if (!ensureAccessAfterRegistration(action)) {
@@ -2959,6 +3320,7 @@ async function onClick(event) {
     revokeActiveDocumentViewer();
     setState({
       activeTab: nextTab,
+      infoPageId: "",
       sidebarOpen: false,
       documentViewer: createEmptyDocumentViewerState(),
     });
@@ -2972,6 +3334,7 @@ async function onClick(event) {
     revokeActiveDocumentViewer();
     setState({
       activeTab: "academic",
+      infoPageId: "",
       agendaTab: button.dataset.tab || "today",
       sidebarOpen: false,
       documentViewer: createEmptyDocumentViewerState(),
@@ -2986,6 +3349,7 @@ async function onClick(event) {
     revokeActiveDocumentViewer();
     setState({
       activeTab: "academic",
+      infoPageId: "",
       agendaTab: button.dataset.tab || "today",
       sidebarOpen: false,
       documentViewer: createEmptyDocumentViewerState(),
@@ -3031,6 +3395,7 @@ async function onClick(event) {
       revokeActiveDocumentViewer();
       setState({
         activeTab: REGISTRATION_TAB_ID,
+        infoPageId: "",
         sidebarOpen: false,
         documentViewer: createEmptyDocumentViewerState(),
         uploadError: "",
@@ -4813,6 +5178,7 @@ function persistUiState() {
     UI_STORAGE_KEY,
     JSON.stringify({
       activeTab: state.activeTab,
+      infoPageId: state.infoPageId,
       agendaTab: state.agendaTab,
       sidebarOpen: state.sidebarOpen,
       referenceDate: state.referenceDate,

@@ -645,6 +645,14 @@ body::before {
   padding: 1.15rem;
 }
 
+.link-card-button {
+  appearance: none;
+  width: 100%;
+  border: 1px solid var(--line);
+  font: inherit;
+  cursor: pointer;
+}
+
 .link-card-top {
   display: flex;
   justify-content: flex-start;
@@ -656,9 +664,74 @@ body::before {
   font-weight: 700;
 }
 
+.info-card-button {
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.info-card-button:hover,
+.info-card-button:focus-visible {
+  transform: translateY(-2px);
+  border-color: rgba(139, 35, 50, 0.18);
+  box-shadow: 0 24px 44px rgba(15, 23, 42, 0.12);
+}
+
+.info-card-top {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.info-card-mark,
+.info-detail-mark {
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(135deg, var(--green) 0%, var(--green-deep) 100%);
+  box-shadow: 0 12px 24px rgba(99, 27, 37, 0.18);
+}
+
+.info-card-mark {
+  width: 2.85rem;
+  height: 2.85rem;
+  border-radius: 1rem;
+}
+
+.info-card-icon {
+  width: 1.25rem;
+  height: 1.25rem;
+}
+
 .portal-page {
   display: grid;
   gap: 1rem;
+}
+
+.info-detail-hero {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.info-detail-mark {
+  width: 4.5rem;
+  height: 4.5rem;
+  border-radius: 1.35rem;
+  flex: 0 0 auto;
+}
+
+.info-detail-icon {
+  width: 1.8rem;
+  height: 1.8rem;
+}
+
+.info-detail-copy {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.info-detail-copy .section-copy,
+.info-detail-copy .portal-paragraph {
+  margin: 0;
 }
 
 .portal-page-head {
@@ -1344,6 +1417,10 @@ body::before {
 
   .header-bar {
     grid-template-columns: 1fr;
+  }
+
+  .info-detail-hero {
+    flex-direction: column;
   }
 
   .header-brand,
