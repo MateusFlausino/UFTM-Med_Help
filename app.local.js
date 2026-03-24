@@ -102,6 +102,32 @@ const ANNOUNCEMENT_HOME_SECTIONS = [
     ],
   },
 ];
+const EXPANSION_LINKS = [
+  {
+    id: "one-time-payment",
+    title: "Pagamento unico",
+    description: "Espaco reservado para um checkout simples de compra avulsa ou acesso individual.",
+    href: "#pagamento-unico",
+    hint: "Substituir pelo link do checkout",
+    badge: "Monetizacao",
+  },
+  {
+    id: "plus-plan",
+    title: "Plano Plus",
+    description: "Area pronta para um futuro plano com beneficios extras, recursos premium e upgrades.",
+    href: "#plano-plus",
+    hint: "Substituir pelo link do Plus",
+    badge: "Plus",
+  },
+  {
+    id: "academic-leagues",
+    title: "Ligas Academicas",
+    description: "Espaco para concentrar links simples, descricoes curtas e acessos rapidos das ligas.",
+    href: "#ligas-academicas",
+    hint: "Substituir pelo portal das ligas",
+    badge: "Comunidade",
+  },
+];
 const PENDING_REGISTRATION_MESSAGE = "Aguardando finalização do cadastro. Envie a grade horária e o link da carteirinha estudantil para liberar o app.";
 
 const UI_STORAGE_KEY = "uftm-mobile-local-ui-v1";
@@ -2236,6 +2262,8 @@ function renderHomePanel(activeUpload) {
 
       ${renderAnnouncementsFeed({ excludeIds: spotlightAnnouncement ? [spotlightAnnouncement.id] : [] })}
 
+      ${renderExpansionLinksPanel()}
+
       <section class="paper-card simple-section">
         <div class="section-header-row">
           <div>
@@ -2307,6 +2335,39 @@ function renderNotificationPanel(activeUpload) {
         ${activeUpload ? `<button class="ghost" data-action="open-academic-tab" data-tab="today">Ver aulas</button>` : ""}
       </div>
     </section>
+  `;
+}
+
+function renderExpansionLinksPanel() {
+  return `
+    <section class="paper-card simple-section">
+      <div class="section-header-row">
+        <div>
+          <div class="section-topline">Expansao</div>
+          <h2 class="section-title">Planos, checkout e ligas</h2>
+        </div>
+        <span class="tag">Estrutura pronta</span>
+      </div>
+      <p class="section-copy">A home agora ja comporta um checkout de pagamento unico, um futuro Plano Plus e um espaco simples para Ligas Academicas, apenas com links e descricoes curtas.</p>
+      <div class="link-grid" style="margin-top: 1rem;">
+        ${EXPANSION_LINKS.map(renderExpansionLinkCard).join("")}
+      </div>
+    </section>
+  `;
+}
+
+function renderExpansionLinkCard(item) {
+  return `
+    <a class="paper-card feature-card link-card" href="${escapeAttribute(item.href)}">
+      <div class="link-card-top">
+        <span class="tag">${escape(item.badge)}</span>
+      </div>
+      <div>
+        <h3 class="schedule-title">${escape(item.title)}</h3>
+        <p class="section-copy">${escape(item.description)}</p>
+      </div>
+      <span class="link-hint">${escape(item.hint)}</span>
+    </a>
   `;
 }
 
