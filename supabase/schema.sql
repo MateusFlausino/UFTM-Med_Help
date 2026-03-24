@@ -50,10 +50,22 @@ create table if not exists public.admin_announcements (
   is_published boolean not null default true,
   created_by uuid references auth.users(id) on delete set null,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint admin_announcements_category_check
-    check (category in ('daily_notice', 'party_announcement'))
+  updated_at timestamptz not null default now()
 );
+
+alter table public.admin_announcements
+  drop constraint if exists admin_announcements_category_check;
+
+alter table public.admin_announcements
+  add constraint admin_announcements_category_check
+  check (category in (
+    'announcement',
+    'daily_notice',
+    'academic_notice',
+    'event_announcement',
+    'party_announcement',
+    'urgent_notice'
+  ));
 
 create table if not exists public.user_preferences (
   user_id uuid primary key references auth.users(id) on delete cascade,

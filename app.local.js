@@ -8,7 +8,8 @@ const SUPABASE_BUCKET = "student-pdfs";
 const REGISTRATION_TAB_ID = "registration";
 const DOCUMENT_VIEWER_TAB_ID = "document-viewer";
 const ADMIN_TAB_ID = "admin";
-const MENU_AUTO_REFRESH_MS = 7 * 24 * 60 * 60 * 1000;
+const MENU_AUTO_REFRESH_MS = 6 * 60 * 60 * 1000;
+const MENU_REFRESH_HEARTBEAT_MS = 30 * 60 * 1000;
 const CLASS_NOTIFICATION_LEAD_MINUTES = 10;
 const NOTIFICATION_PROMPT_STORAGE_KEY = "uftm-mobile-notification-prompt-v1";
 const NOTIFICATION_HISTORY_STORAGE_KEY = "uftm-mobile-notification-history-v1";
@@ -18,9 +19,90 @@ const DOCUMENT_TYPES = {
   studentCard: "student_card",
 };
 const ANNOUNCEMENT_CATEGORIES = {
+  announcement: "announcement",
   dailyNotice: "daily_notice",
+  academicNotice: "academic_notice",
+  eventAnnouncement: "event_announcement",
   partyAnnouncement: "party_announcement",
+  urgentNotice: "urgent_notice",
 };
+const ANNOUNCEMENT_CATEGORY_OPTIONS = [
+  {
+    id: ANNOUNCEMENT_CATEGORIES.announcement,
+    label: "Anuncio",
+    description: "Comunicado geral para campanhas, chamadas e destaques do DA.",
+    placement: "Destaque principal da tela inicial",
+    tone: "announcement",
+    spotlight: true,
+  },
+  {
+    id: ANNOUNCEMENT_CATEGORIES.dailyNotice,
+    label: "Aviso do dia",
+    description: "Recado rapido para a rotina dos alunos ao longo do dia.",
+    placement: "Bloco de avisos rapidos",
+    tone: "notice",
+    spotlight: false,
+  },
+  {
+    id: ANNOUNCEMENT_CATEGORIES.academicNotice,
+    label: "Academico",
+    description: "Mudancas de aula, provas, monitorias, prazos e orientacoes.",
+    placement: "Bloco academico da home",
+    tone: "academic",
+    spotlight: false,
+  },
+  {
+    id: ANNOUNCEMENT_CATEGORIES.eventAnnouncement,
+    label: "Evento",
+    description: "Palestras, congressos, inscricoes e atividades abertas.",
+    placement: "Bloco de eventos e anuncios",
+    tone: "event",
+    spotlight: true,
+  },
+  {
+    id: ANNOUNCEMENT_CATEGORIES.partyAnnouncement,
+    label: "Festa",
+    description: "Divulgacao de festas, integracoes e experiencias do curso.",
+    placement: "Bloco de eventos e anuncios",
+    tone: "party",
+    spotlight: false,
+  },
+  {
+    id: ANNOUNCEMENT_CATEGORIES.urgentNotice,
+    label: "Urgente",
+    description: "Comunicado critico com prioridade maxima para aparecer primeiro.",
+    placement: "Destaque principal da tela inicial",
+    tone: "urgent",
+    spotlight: true,
+  },
+];
+const ANNOUNCEMENT_HOME_SECTIONS = [
+  {
+    id: "academic",
+    topline: "Academico",
+    title: "Atualizacoes da rotina academica",
+    categories: [ANNOUNCEMENT_CATEGORIES.academicNotice],
+  },
+  {
+    id: "events",
+    topline: "Eventos e anuncios",
+    title: "Chamadas abertas para a comunidade",
+    categories: [
+      ANNOUNCEMENT_CATEGORIES.announcement,
+      ANNOUNCEMENT_CATEGORIES.eventAnnouncement,
+      ANNOUNCEMENT_CATEGORIES.partyAnnouncement,
+    ],
+  },
+  {
+    id: "notices",
+    topline: "Avisos rapidos",
+    title: "Recados ativos para hoje",
+    categories: [
+      ANNOUNCEMENT_CATEGORIES.dailyNotice,
+      ANNOUNCEMENT_CATEGORIES.urgentNotice,
+    ],
+  },
+];
 const PENDING_REGISTRATION_MESSAGE = "Aguardando finalização do cadastro. Envie a grade horária e o link da carteirinha estudantil para liberar o app.";
 
 const UI_STORAGE_KEY = "uftm-mobile-local-ui-v1";
@@ -76,6 +158,7 @@ let authSubscription = null;
 let notificationServiceWorkerRegistration = null;
 let classNotificationTimerId = 0;
 let classNotificationHeartbeatId = 0;
+let menuRefreshHeartbeatId = 0;
 let scheduledReminderKey = "";
 
 clearPublicBootstrapData();
@@ -116,6 +199,7 @@ appElement.addEventListener("click", onClick);
 appElement.addEventListener("change", onChange);
 appElement.addEventListener("input", onInput);
 appElement.addEventListener("load", onLoad, true);
+document.addEventListener("visibilitychange", onVisibilityChange);
 
 init().catch((error) => {
   appElement.innerHTML = renderStartupFailure(error);
@@ -124,6 +208,7 @@ init().catch((error) => {
 async function init() {
   render();
   void registerNotificationServiceWorker();
+  startMenuRefreshHeartbeat();
   refreshRuMenuIfNeeded(true);
 
   if (!supabaseReady) {
@@ -287,6 +372,7 @@ async function handleSupabaseSession(session) {
     });
 
     void syncUserPreferences();
+    void maybeShowMenuNotification(state.menu[0] || null);
     if (resolvedAdminAccess.isAdmin) {
       void refreshAdminDashboard(true);
     }
@@ -788,7 +874,7 @@ function createEmptyDocumentViewerState() {
 
 function createEmptyAdminDraft() {
   return {
-    category: ANNOUNCEMENT_CATEGORIES.dailyNotice,
+    category: ANNOUNCEMENT_CATEGORIES.announcement,
     title: "",
     body: "",
     startsAt: "",
@@ -1066,15 +1152,57 @@ function normalizeAdminAnnouncementRow(row) {
 }
 
 function normalizeAnnouncementCategory(value) {
-  return value === ANNOUNCEMENT_CATEGORIES.partyAnnouncement
-    ? ANNOUNCEMENT_CATEGORIES.partyAnnouncement
+  const normalized = String(value || "").trim();
+  return ANNOUNCEMENT_CATEGORY_OPTIONS.some((item) => item.id === normalized)
+    ? normalized
     : ANNOUNCEMENT_CATEGORIES.dailyNotice;
 }
 
+function getAnnouncementCategoryMeta(category) {
+  const normalized = normalizeAnnouncementCategory(category);
+  return ANNOUNCEMENT_CATEGORY_OPTIONS.find((item) => item.id === normalized) || ANNOUNCEMENT_CATEGORY_OPTIONS[1];
+}
+
 function getAnnouncementCategoryLabel(category) {
-  return category === ANNOUNCEMENT_CATEGORIES.partyAnnouncement
-    ? "Festas"
-    : "Avisos do dia";
+  return getAnnouncementCategoryMeta(category).label;
+}
+
+function getAnnouncementCategoryDescription(category) {
+  return getAnnouncementCategoryMeta(category).description;
+}
+
+function getAnnouncementCategoryPlacement(category) {
+  return getAnnouncementCategoryMeta(category).placement;
+}
+
+function getAnnouncementCategoryTone(category) {
+  return getAnnouncementCategoryMeta(category).tone;
+}
+
+function getAnnouncementToneClass(category) {
+  return `is-${getAnnouncementCategoryTone(category)}`;
+}
+
+function isAnnouncementSpotlightCategory(category) {
+  return Boolean(getAnnouncementCategoryMeta(category).spotlight);
+}
+
+function getAnnouncementPriority(category) {
+  const normalized = normalizeAnnouncementCategory(category);
+  const priorityMap = {
+    [ANNOUNCEMENT_CATEGORIES.urgentNotice]: 0,
+    [ANNOUNCEMENT_CATEGORIES.announcement]: 1,
+    [ANNOUNCEMENT_CATEGORIES.eventAnnouncement]: 2,
+    [ANNOUNCEMENT_CATEGORIES.academicNotice]: 3,
+    [ANNOUNCEMENT_CATEGORIES.partyAnnouncement]: 4,
+    [ANNOUNCEMENT_CATEGORIES.dailyNotice]: 5,
+  };
+
+  return priorityMap[normalized] ?? 9;
+}
+
+function getAnnouncementDisplayTime(item) {
+  return String(item?.startsAt || item?.createdAt || "");
 }
 
 function isAnnouncementActive(item, now = new Date()) {
@@ -1090,9 +1218,29 @@ function isAnnouncementActive(item, now = new Date()) {
 }
 
 function getActiveAnnouncementsByCategory(category) {
-  return state.announcements
-    .filter((item) => item.category === category && isAnnouncementActive(item))
-    .sort((left, right) => String(right.startsAt || right.createdAt).localeCompare(String(left.startsAt || left.createdAt)));
+  return getActiveAnnouncements().filter((item) => item.category === category);
+}
+
+function sortAnnouncementsForDisplay(items) {
+  return [...(items || [])].sort((left, right) => {
+    const priorityDiff = getAnnouncementPriority(left.category) - getAnnouncementPriority(right.category);
+    if (priorityDiff !== 0) {
+      return priorityDiff;
+    }
+
+    return getAnnouncementDisplayTime(right).localeCompare(getAnnouncementDisplayTime(left));
+  });
+}
+
+function getActiveAnnouncements() {
+  return sortAnnouncementsForDisplay(
+    state.announcements.filter((item) => isAnnouncementActive(item)),
+  );
+}
+
+function getAnnouncementSpotlight(items = getActiveAnnouncements()) {
+  const active = sortAnnouncementsForDisplay(items);
+  return active.find((item) => isAnnouncementSpotlightCategory(item.category)) || null;
 }
 
 function getAnnouncementStatusLabel(item) {
@@ -1239,6 +1387,16 @@ function onLoad(event) {
   }
 
   applyStudentCardStageRatio(target);
+}
+
+function onVisibilityChange() {
+  if (typeof document === "undefined" || document.visibilityState !== "visible") {
+    return;
+  }
+
+  refreshRuMenuIfNeeded(true);
+  void maybeShowMenuNotification(state.menu[0] || null);
+  syncClassNotifications();
 }
 
 function syncStudentCardStageRatio() {
@@ -1579,10 +1737,146 @@ function renderAdminAccessDenied() {
   `;
 }
 
+function buildAdminAnnouncementBuckets(items) {
+  const active = [];
+  const scheduled = [];
+  const library = [];
+
+  for (const item of items || []) {
+    if (isAnnouncementActive(item)) {
+      active.push(item);
+      continue;
+    }
+
+    if (item.isPublished && item.startsAt && new Date(item.startsAt).getTime() > Date.now()) {
+      scheduled.push(item);
+      continue;
+    }
+
+    library.push(item);
+  }
+
+  return {
+    active: sortAnnouncementsForDisplay(active),
+    scheduled: sortAnnouncementsForDisplay(scheduled),
+    library: sortAnnouncementsForDisplay(library),
+  };
+}
+
+function renderAdminCategoryOption(option, selectedCategory) {
+  const isSelected = option.id === normalizeAnnouncementCategory(selectedCategory);
+  return `
+    <button class="announcement-type-option ${isSelected ? "is-selected" : ""} ${getAnnouncementToneClass(option.id)}" type="button" data-action="set-admin-category" data-category="${escapeAttribute(option.id)}">
+      <div>
+        <strong>${escape(option.label)}</strong>
+        <span>${escape(option.description)}</span>
+      </div>
+      <small>${escape(option.placement)}</small>
+    </button>
+  `;
+}
+
+function buildAdminDraftPreview(draft) {
+  return {
+    id: "draft-preview",
+    category: normalizeAnnouncementCategory(draft?.category),
+    title: String(draft?.title || "").trim() || "Seu anuncio aparece aqui",
+    body: String(draft?.body || "").trim() || "Escreva uma mensagem objetiva para os alunos entenderem o que mudou e qual acao tomar.",
+    actionLabel: String(draft?.actionLabel || "").trim(),
+    actionUrl: normalizeOptionalHttpUrl(draft?.actionUrl || ""),
+    startsAt: normalizeAdminDateTimeValue(draft?.startsAt || "") || "",
+    endsAt: normalizeAdminDateTimeValue(draft?.endsAt || "") || "",
+    isPublished: Boolean(draft?.isPublished),
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function renderAdminDraftPreview(draft) {
+  const preview = buildAdminDraftPreview(draft);
+  const placement = getAnnouncementCategoryPlacement(preview.category);
+  const previewCard = isAnnouncementSpotlightCategory(preview.category)
+    ? renderAnnouncementSpotlight(preview, {
+        preview: true,
+        topline: "Destaque inicial",
+        helper: placement,
+      })
+    : renderPublishedAnnouncementCard(preview);
+
+  return `
+    <div class="section-stack" style="margin-top: 1rem;">
+      ${previewCard}
+      <div class="mini-card">
+        <small>Posicionamento</small>
+        <strong>${escape(placement)}</strong>
+        <span>${escape(getAnnouncementCategoryDescription(preview.category))}</span>
+      </div>
+    </div>
+  `;
+}
+
+function renderAdminAnnouncementBucket(title, description, items) {
+  return `
+    <section class="admin-announcement-column">
+      <div class="admin-announcement-column-head">
+        <div>
+          <h3>${escape(title)}</h3>
+          <p>${escape(description)}</p>
+        </div>
+        <span class="tag">${String(items.length)}</span>
+      </div>
+      <div class="upload-list">
+        ${items.length
+          ? items.map(renderAdminAnnouncementItem).join("")
+          : `<div class="empty-state">Nenhuma publicacao nesta coluna.</div>`}
+      </div>
+    </section>
+  `;
+}
+
+function renderAnnouncementSpotlight(item, options = {}) {
+  if (!item) {
+    return "";
+  }
+
+  const helper = options.helper || getAnnouncementCategoryPlacement(item.category);
+  return `
+    <section class="paper-card announcement-spotlight ${getAnnouncementToneClass(item.category)}">
+      <div class="announcement-spotlight-top">
+        <div>
+          <div class="section-topline">${escape(options.topline || "Anuncio em destaque")}</div>
+          <h2 class="section-title">${escape(item.title)}</h2>
+        </div>
+        <span class="tag">${escape(getAnnouncementCategoryLabel(item.category))}</span>
+      </div>
+      <p class="section-copy">${escape(item.body || getAnnouncementCategoryDescription(item.category))}</p>
+      <div class="item-meta">
+        <span class="tag">${escape(helper)}</span>
+        ${item.startsAt ? `<span class="tag">${options.preview ? "Inicio" : "Visivel desde"} ${escape(formatShortDateTime(item.startsAt))}</span>` : ""}
+        ${item.endsAt ? `<span class="tag">Ate ${escape(formatShortDateTime(item.endsAt))}</span>` : ""}
+      </div>
+      ${item.actionUrl
+        ? `<div class="button-row" style="margin-top: 0.9rem;"><a class="secondary link-button" href="${escapeAttribute(item.actionUrl)}" target="_blank" rel="noreferrer">${escape(item.actionLabel || "Abrir link")}</a></div>`
+        : ""}
+    </section>
+  `;
+}
+
+function renderHomeAnnouncementSpotlight(item) {
+  if (!item) {
+    return "";
+  }
+
+  return renderAnnouncementSpotlight(item, {
+    topline: "Anuncio em destaque",
+    helper: "Espaco principal da home",
+  });
+}
+
 function renderAdminPanel() {
   const draft = state.adminDraft || createEmptyAdminDraft();
   const announcements = [...state.announcements]
     .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
+  const buckets = buildAdminAnnouncementBuckets(announcements);
 
   return `
     <section class="section-stack simple-stack">
@@ -1590,13 +1884,13 @@ function renderAdminPanel() {
         <div class="section-header-row">
           <div>
             <div class="section-topline">Administração</div>
-            <h2 class="section-title">Avisos, festas e métricas do aplicativo</h2>
+            <h2 class="section-title">Anuncios, avisos e metricas do aplicativo</h2>
           </div>
           <div class="button-row">
             <button class="ghost" data-action="admin-refresh">Atualizar painel</button>
           </div>
         </div>
-        <p class="section-copy">Use esta área para publicar avisos do dia, divulgar festas e acompanhar a adoção do app com métricas simples e acionáveis.</p>
+        <p class="section-copy">Use esta area para publicar anuncios, avisos academicos, comunicados urgentes, eventos e festas em um feed mais organizado para os alunos.</p>
         <div class="metrics-grid" style="margin-top: 1rem;">
           ${metric("Usuários", String(state.adminStats.totalUsers), "contas com login criado")}
           ${metric("Ativos 7d", String(state.adminStats.activeUsers7d), "abriram o app na última semana")}
@@ -1604,74 +1898,94 @@ function renderAdminPanel() {
           ${metric("Notificações", String(state.adminStats.notificationSubscribers), "aceitaram os avisos do app")}
           ${metric("Modo app", String(state.adminStats.standaloneUsers), "abriram em modo instalado")}
         </div>
+        <div class="simple-meta-grid admin-announcement-summary" style="margin-top: 1rem;">
+          ${renderRegistrationStatusCard("Ativos agora", String(buckets.active.length), "ja aparecem para os alunos")}
+          ${renderRegistrationStatusCard("Agendados", String(buckets.scheduled.length), "entram automaticamente no horario")}
+          ${renderRegistrationStatusCard("Rascunhos e arquivo", String(buckets.library.length), "itens fora do feed atual")}
+        </div>
         ${state.adminError ? `<div class="toast is-warning" style="margin-top: 1rem;">${escape(state.adminError)}</div>` : ""}
       </section>
 
       <section class="paper-card simple-section">
         <div class="section-header-row">
           <div>
-            <div class="section-topline">Publicação</div>
-            <h2 class="section-title">Novo aviso</h2>
+            <div class="section-topline">Publicacao</div>
+            <h2 class="section-title">Novo conteudo para a home</h2>
           </div>
         </div>
-        <p class="section-copy">Os avisos publicados entram na home do app. Use “Avisos do dia” para recados rápidos e “Festas” para chamadas de eventos.</p>
-        <div class="form-grid">
-          <div class="inline-field">
-            <label for="adminDraftCategory">Tipo</label>
-            <select id="adminDraftCategory">
-              <option value="${ANNOUNCEMENT_CATEGORIES.dailyNotice}" ${draft.category === ANNOUNCEMENT_CATEGORIES.dailyNotice ? "selected" : ""}>Aviso do dia</option>
-              <option value="${ANNOUNCEMENT_CATEGORIES.partyAnnouncement}" ${draft.category === ANNOUNCEMENT_CATEGORIES.partyAnnouncement ? "selected" : ""}>Festa</option>
-            </select>
-          </div>
-          <div class="inline-field">
-            <label for="adminDraftTitle">Título</label>
-            <input id="adminDraftTitle" type="text" maxlength="120" value="${escapeAttribute(draft.title)}" placeholder="Ex.: Reunião do DAGV às 18h" />
-          </div>
-          <div class="inline-field">
-            <label for="adminDraftBody">Mensagem</label>
-            <textarea id="adminDraftBody" rows="5" maxlength="1200" placeholder="Escreva o conteúdo que deve aparecer para os alunos.">${escape(draft.body)}</textarea>
-          </div>
-          <div class="simple-meta-grid">
+        <p class="section-copy">Escolha o tipo do conteudo, revise a previa e publique. Os anuncios em destaque ganham um espaco proprio logo no topo da tela inicial.</p>
+        <div class="admin-compose-grid">
+          <div class="form-grid">
             <div class="inline-field">
-              <label for="adminDraftStartsAt">Início</label>
-              <input id="adminDraftStartsAt" type="datetime-local" value="${escapeAttribute(draft.startsAt)}" />
+              <label for="adminDraftCategory">Tipo</label>
+              <select id="adminDraftCategory">
+                ${ANNOUNCEMENT_CATEGORY_OPTIONS.map((option) => `
+                  <option value="${option.id}" ${draft.category === option.id ? "selected" : ""}>${escape(option.label)}</option>
+                `).join("")}
+              </select>
+            </div>
+            <div class="announcement-type-grid">
+              ${ANNOUNCEMENT_CATEGORY_OPTIONS.map((option) => renderAdminCategoryOption(option, draft.category)).join("")}
             </div>
             <div class="inline-field">
-              <label for="adminDraftEndsAt">Fim</label>
-              <input id="adminDraftEndsAt" type="datetime-local" value="${escapeAttribute(draft.endsAt)}" />
-            </div>
-          </div>
-          <div class="simple-meta-grid">
-            <div class="inline-field">
-              <label for="adminDraftActionLabel">Texto do botão</label>
-              <input id="adminDraftActionLabel" type="text" maxlength="40" value="${escapeAttribute(draft.actionLabel)}" placeholder="Ex.: Abrir inscrição" />
+              <label for="adminDraftTitle">Titulo</label>
+              <input id="adminDraftTitle" type="text" maxlength="120" value="${escapeAttribute(draft.title)}" placeholder="Ex.: Jornada academica com inscricoes abertas" />
             </div>
             <div class="inline-field">
-              <label for="adminDraftActionUrl">Link do botão</label>
-              <input id="adminDraftActionUrl" type="url" value="${escapeAttribute(draft.actionUrl)}" placeholder="https://..." />
+              <label for="adminDraftBody">Mensagem</label>
+              <textarea id="adminDraftBody" rows="5" maxlength="1200" placeholder="Escreva o conteudo que deve aparecer para os alunos.">${escape(draft.body)}</textarea>
+            </div>
+            <div class="simple-meta-grid">
+              <div class="inline-field">
+                <label for="adminDraftStartsAt">Inicio</label>
+                <input id="adminDraftStartsAt" type="datetime-local" value="${escapeAttribute(draft.startsAt)}" />
+              </div>
+              <div class="inline-field">
+                <label for="adminDraftEndsAt">Fim</label>
+                <input id="adminDraftEndsAt" type="datetime-local" value="${escapeAttribute(draft.endsAt)}" />
+              </div>
+            </div>
+            <div class="simple-meta-grid">
+              <div class="inline-field">
+                <label for="adminDraftActionLabel">Texto do botao</label>
+                <input id="adminDraftActionLabel" type="text" maxlength="40" value="${escapeAttribute(draft.actionLabel)}" placeholder="Ex.: Abrir inscricao" />
+              </div>
+              <div class="inline-field">
+                <label for="adminDraftActionUrl">Link do botao</label>
+                <input id="adminDraftActionUrl" type="url" value="${escapeAttribute(draft.actionUrl)}" placeholder="https://..." />
+              </div>
+            </div>
+            <label class="checkbox-field" for="adminDraftPublished">
+              <input id="adminDraftPublished" type="checkbox" ${draft.isPublished ? "checked" : ""} />
+              <span>Publicar imediatamente</span>
+            </label>
+            <div class="button-row">
+              <button class="secondary" data-action="save-admin-announcement" ${state.adminLoading ? "disabled" : ""}>${state.adminLoading ? "Salvando..." : "Salvar aviso"}</button>
+              <button class="ghost" data-action="admin-refresh">Recarregar</button>
             </div>
           </div>
-          <label class="checkbox-field" for="adminDraftPublished">
-            <input id="adminDraftPublished" type="checkbox" ${draft.isPublished ? "checked" : ""} />
-            <span>Publicar imediatamente</span>
-          </label>
-          <div class="button-row">
-            <button class="secondary" data-action="save-admin-announcement" ${state.adminLoading ? "disabled" : ""}>${state.adminLoading ? "Salvando..." : "Salvar aviso"}</button>
-            <button class="ghost" data-action="admin-refresh">Recarregar</button>
-          </div>
+          <aside class="announcement-preview-shell">
+            <div class="section-topline">Previa</div>
+            <h3 class="section-title">Como vai aparecer para o aluno</h3>
+            <p class="section-copy">O app usa um destaque principal para anuncios e um feed organizado por tipo logo abaixo.</p>
+            ${renderAdminDraftPreview(draft)}
+          </aside>
         </div>
       </section>
 
       <section class="paper-card simple-section">
         <div class="section-header-row">
           <div>
-            <div class="section-topline">Publicações</div>
-            <h2 class="section-title">Avisos cadastrados</h2>
+            <div class="section-topline">Organizacao</div>
+            <h2 class="section-title">Publicacoes cadastradas</h2>
           </div>
+          <span class="tag">${String(announcements.length)} itens</span>
         </div>
-        ${announcements.length
-          ? `<div class="upload-list" style="margin-top: 1rem;">${announcements.map(renderAdminAnnouncementItem).join("")}</div>`
-          : `<div class="empty-state" style="margin-top: 1rem;">Nenhum aviso cadastrado ainda.</div>`}
+        <div class="admin-board-grid" style="margin-top: 1rem;">
+          ${renderAdminAnnouncementBucket("Ativos agora", "Entraram na home do app.", buckets.active)}
+          ${renderAdminAnnouncementBucket("Agendados", "Aguardando a janela de publicacao.", buckets.scheduled)}
+          ${renderAdminAnnouncementBucket("Rascunhos e arquivo", "Itens despublicados ou encerrados.", buckets.library)}
+        </div>
       </section>
     </section>
   `;
@@ -1679,17 +1993,17 @@ function renderAdminPanel() {
 
 function renderAdminAnnouncementItem(item) {
   return `
-    <article class="upload-entry admin-announcement-entry ${item.category === ANNOUNCEMENT_CATEGORIES.partyAnnouncement ? "is-party" : ""}">
+    <article class="upload-entry admin-announcement-entry ${getAnnouncementToneClass(item.category)}">
       <div class="upload-entry-top">
         <div>
           <h3 class="schedule-title">${escape(item.title)}</h3>
-          <div class="support-line">${escape(getAnnouncementCategoryLabel(item.category))} • ${escape(getAnnouncementStatusLabel(item))} • ${escape(formatShortDateTime(item.createdAt))}</div>
+          <div class="support-line">${escape(getAnnouncementCategoryLabel(item.category))} • ${escape(getAnnouncementStatusLabel(item))} • ${escape(getAnnouncementCategoryPlacement(item.category))}</div>
         </div>
         <span class="tag">${escape(getAnnouncementStatusLabel(item))}</span>
       </div>
       ${item.body ? `<p class="section-copy" style="margin-top: 0.75rem;">${escape(item.body)}</p>` : ""}
       <div class="item-meta">
-        ${item.startsAt ? `<span class="tag">Início ${escape(formatShortDateTime(item.startsAt))}</span>` : ""}
+        ${item.startsAt ? `<span class="tag">Inicio ${escape(formatShortDateTime(item.startsAt))}</span>` : ""}
         ${item.endsAt ? `<span class="tag">Fim ${escape(formatShortDateTime(item.endsAt))}</span>` : ""}
         ${item.actionUrl ? `<span class="tag">${escape(item.actionLabel || "Link externo")}</span>` : ""}
       </div>
@@ -1701,45 +2015,46 @@ function renderAdminAnnouncementItem(item) {
   `;
 }
 
-function renderAnnouncementsFeed() {
-  const dailyNotices = getActiveAnnouncementsByCategory(ANNOUNCEMENT_CATEGORIES.dailyNotice);
-  const partyAnnouncements = getActiveAnnouncementsByCategory(ANNOUNCEMENT_CATEGORIES.partyAnnouncement);
+function renderAnnouncementsFeed(options = {}) {
+  const excludeIds = new Set(options.excludeIds || []);
+  const activeAnnouncements = getActiveAnnouncements().filter((item) => !excludeIds.has(item.id));
+  const sections = ANNOUNCEMENT_HOME_SECTIONS
+    .map((section) => ({
+      ...section,
+      items: activeAnnouncements.filter((item) => section.categories.includes(item.category)).slice(0, 4),
+    }))
+    .filter((section) => section.items.length);
 
-  if (!dailyNotices.length && !partyAnnouncements.length) {
+  if (!sections.length) {
     return "";
   }
 
   return `
-    <section class="section-stack">
-      ${dailyNotices.length ? `
-        <section class="paper-card simple-section">
-          <div class="section-topline">Avisos do dia</div>
-          <h2 class="section-title">Recados ativos para os alunos</h2>
-          <div class="upload-list" style="margin-top: 1rem;">
-            ${dailyNotices.slice(0, 3).map(renderPublishedAnnouncementCard).join("")}
-          </div>
-        </section>
-      ` : ""}
-      ${partyAnnouncements.length ? `
-        <section class="paper-card simple-section">
-          <div class="section-topline">Festas</div>
-          <h2 class="section-title">Próximos anúncios do curso</h2>
-          <div class="upload-list" style="margin-top: 1rem;">
-            ${partyAnnouncements.slice(0, 3).map(renderPublishedAnnouncementCard).join("")}
-          </div>
-        </section>
-      ` : ""}
+    <section class="section-stack announcement-feed-stack">
+      ${sections.map(renderAnnouncementCollection).join("")}
+    </section>
+  `;
+}
+
+function renderAnnouncementCollection(section) {
+  return `
+    <section class="paper-card simple-section">
+      <div class="section-topline">${escape(section.topline)}</div>
+      <h2 class="section-title">${escape(section.title)}</h2>
+      <div class="upload-list" style="margin-top: 1rem;">
+        ${section.items.map(renderPublishedAnnouncementCard).join("")}
+      </div>
     </section>
   `;
 }
 
 function renderPublishedAnnouncementCard(item) {
   return `
-    <article class="upload-entry admin-announcement-entry ${item.category === ANNOUNCEMENT_CATEGORIES.partyAnnouncement ? "is-party" : ""}">
+    <article class="upload-entry admin-announcement-entry ${getAnnouncementToneClass(item.category)}">
       <div class="upload-entry-top">
         <div>
           <h3 class="schedule-title">${escape(item.title)}</h3>
-          <div class="support-line">${escape(getAnnouncementCategoryLabel(item.category))}${item.startsAt ? ` • ${escape(formatShortDateTime(item.startsAt))}` : ""}</div>
+          <div class="support-line">${escape(getAnnouncementCategoryLabel(item.category))} • ${escape(getAnnouncementCategoryPlacement(item.category))}${item.startsAt ? ` • ${escape(formatShortDateTime(item.startsAt))}` : ""}</div>
         </div>
         <span class="tag">${escape(getAnnouncementStatusLabel(item))}</span>
       </div>
@@ -1755,6 +2070,7 @@ function renderHomePanel(activeUpload) {
   const todayClasses = getClassesForDate(schedule, state.referenceDate);
   const nextClass = findNextClass(schedule, state.referenceDate);
   const menu = state.menu[0] || null;
+  const spotlightAnnouncement = getAnnouncementSpotlight();
   return `
     <section class="section-stack simple-stack">
       <section class="paper-card dashboard-highlight">
@@ -1767,6 +2083,8 @@ function renderHomePanel(activeUpload) {
         </div>
       </section>
 
+      ${renderHomeAnnouncementSpotlight(spotlightAnnouncement)}
+
       <section class="home-shortcuts">
         ${renderHomeShortcut("calendar-day", "Hoje", "open-academic-tab", "today")}
         ${renderHomeShortcut("utensils", "RU", "open-academic-tab", "menu")}
@@ -1776,7 +2094,9 @@ function renderHomePanel(activeUpload) {
         ${state.isAdmin ? renderHomeShortcut("shield", "Admin", "open-admin", "") : ""}
       </section>
 
-      ${renderAnnouncementsFeed()}
+      ${renderNotificationPanel(activeUpload)}
+
+      ${renderAnnouncementsFeed({ excludeIds: spotlightAnnouncement ? [spotlightAnnouncement.id] : [] })}
 
       <section class="paper-card simple-section">
         <div class="section-header-row">
@@ -1818,13 +2138,171 @@ function renderHomePanel(activeUpload) {
   `;
 }
 
+function renderNotificationPanel(activeUpload) {
+  const notificationsSupported = supportsClassNotifications();
+  const permission = resolveNotificationPermissionStatus();
+  const menu = state.menu[0] || null;
+  const academicData = getAcademicData(activeUpload);
+  const schedule = academicData?.schedule || [];
+  const nextReminder = activeUpload && schedule.length
+    ? getNextClassReminder(schedule, activeUpload.id || "")
+    : null;
+  const activationLabel = permission === "denied" ? "Como liberar avisos" : "Ativar avisos";
+
+  return `
+    <section class="paper-card simple-section">
+      <div class="section-header-row">
+        <div>
+          <div class="section-topline">Notificacoes</div>
+          <h2 class="section-title">Cardapio do dia e aulas</h2>
+        </div>
+        <span class="tag">${escape(getNotificationPermissionLabel(permission, notificationsSupported))}</span>
+      </div>
+      <p class="section-copy">${escape(buildNotificationPanelCopy(permission, notificationsSupported))}</p>
+      <div class="simple-meta-grid">
+        ${renderRegistrationStatusCard("Cardapio do dia", getMenuNotificationStatus(menu, permission, notificationsSupported), buildMenuNotificationCaption(menu, permission, notificationsSupported))}
+        ${renderRegistrationStatusCard("Aulas", getClassNotificationStatus(activeUpload, nextReminder, permission, notificationsSupported), buildClassNotificationCaption(activeUpload, nextReminder, permission, notificationsSupported))}
+      </div>
+      <div class="button-row" style="margin-top: 1rem;">
+        ${notificationsSupported && permission !== "granted" ? `<button class="secondary" data-action="enable-notifications">${escape(activationLabel)}</button>` : ""}
+        <button class="ghost" data-action="open-academic-tab" data-tab="menu">Ver RU</button>
+        ${activeUpload ? `<button class="ghost" data-action="open-academic-tab" data-tab="today">Ver aulas</button>` : ""}
+      </div>
+    </section>
+  `;
+}
+
+function getNotificationPermissionLabel(permission, notificationsSupported) {
+  if (!notificationsSupported) {
+    return "Sem suporte";
+  }
+
+  if (permission === "granted") {
+    return "Ativas";
+  }
+
+  if (permission === "denied") {
+    return "Bloqueadas";
+  }
+
+  return "Desligadas";
+}
+
+function buildNotificationPanelCopy(permission, notificationsSupported) {
+  if (!notificationsSupported) {
+    return "Este navegador nao oferece suporte aos avisos do app.";
+  }
+
+  if (permission === "granted") {
+    return "Quando o app estiver aberto, voce recebe o cardapio do RU do dia e lembretes 10 minutos antes de cada aula.";
+  }
+
+  if (permission === "denied") {
+    return "Os avisos foram bloqueados. Libere a permissao do site no navegador para voltar a receber o cardapio do RU e os lembretes das aulas.";
+  }
+
+  return "Ative os avisos para receber o cardapio do RU do dia e um lembrete 10 minutos antes das aulas.";
+}
+
+function getMenuNotificationStatus(menu, permission, notificationsSupported) {
+  if (!notificationsSupported) {
+    return "Sem suporte";
+  }
+
+  if (permission === "denied") {
+    return "Bloqueado";
+  }
+
+  if (!menu) {
+    return "Aguardando";
+  }
+
+  if (permission !== "granted") {
+    return "Pronto";
+  }
+
+  return isTodayMenu(menu) ? "Hoje" : formatDateShort(menu.date);
+}
+
+function buildMenuNotificationCaption(menu, permission, notificationsSupported) {
+  if (!notificationsSupported) {
+    return "O navegador atual nao consegue mostrar o aviso do cardapio.";
+  }
+
+  if (permission === "denied") {
+    return "As notificacoes do RU foram bloqueadas neste navegador.";
+  }
+
+  if (!menu) {
+    return "Vou avisar assim que o cardapio do dia estiver disponivel.";
+  }
+
+  const highlight = [menu.mainDish, menu.option, menu.dessert].filter(Boolean).slice(0, 3).join(" • ");
+  if (!highlight) {
+    return permission === "granted"
+      ? `Aviso pronto para ${formatDateShort(menu.date)}.`
+      : `Ultimo cardapio salvo em ${formatDateShort(menu.date)}.`;
+  }
+
+  return permission === "granted"
+    ? `${formatDateShort(menu.date)}: ${highlight}.`
+    : `Ao ativar, o app avisa com este resumo: ${highlight}.`;
+}
+
+function getClassNotificationStatus(activeUpload, nextReminder, permission, notificationsSupported) {
+  if (!activeUpload) {
+    return "Sem grade";
+  }
+
+  if (!notificationsSupported) {
+    return "Sem suporte";
+  }
+
+  if (permission === "denied") {
+    return "Bloqueado";
+  }
+
+  if (permission !== "granted") {
+    return "Aguardando";
+  }
+
+  if (!nextReminder) {
+    return "Sem aulas";
+  }
+
+  return `${CLASS_NOTIFICATION_LEAD_MINUTES} min antes`;
+}
+
+function buildClassNotificationCaption(activeUpload, nextReminder, permission, notificationsSupported) {
+  if (!activeUpload) {
+    return "Envie a grade horaria para liberar os lembretes das aulas.";
+  }
+
+  if (!notificationsSupported) {
+    return "O navegador atual nao consegue mostrar os avisos das aulas.";
+  }
+
+  if (permission === "denied") {
+    return "As notificacoes das aulas foram bloqueadas neste navegador.";
+  }
+
+  if (permission !== "granted") {
+    return "Ative para receber um aviso 10 minutos antes de cada aula.";
+  }
+
+  if (!nextReminder) {
+    return "Nenhuma aula futura encontrada nos proximos dias.";
+  }
+
+  return `${nextReminder.title} em ${formatDateShort(nextReminder.isoDate)} as ${nextReminder.startTime}.`;
+}
+
 function renderAcademicPanel(activeUpload) {
   const academicData = getAcademicData(activeUpload);
   const schedule = academicData?.schedule || [];
   const disciplines = academicData?.disciplines || [];
   const todayClasses = getClassesForDate(schedule, state.referenceDate);
   const weekView = buildWeekView(schedule, state.referenceDate);
-  const nextClass = findNextClass(schedule, state.referenceDate);
 
   if (state.agendaTab === "week") {
     if (!activeUpload) {
@@ -1894,16 +2372,6 @@ function renderAcademicPanel(activeUpload) {
             : renderMissingPdfState("Importe o PDF do SCA para carregar sua agenda.")}
         </div>
       </section>
-
-      ${activeUpload ? `
-        <section class="paper-card simple-section">
-          <div class="simple-meta-grid">
-            <div class="mini-card"><small>Próxima aula</small><strong>${escape(nextClass?.startTime || "--:--")}</strong><span>${escape(nextClass?.title || "sem aula futura")}</span></div>
-            <div class="mini-card"><small>PDF ativo</small><strong>${escape(activeUpload.originalName)}</strong><span>${escape(academicData?.profile?.course || "curso não encontrado")}</span></div>
-            <div class="mini-card"><small>Semana</small><strong>${String(weekView.reduce((acc, day) => acc + day.classes.length, 0))}</strong><span>blocos visíveis</span></div>
-          </div>
-        </section>
-      ` : ""}
     </section>
   `;
 }
@@ -2330,6 +2798,11 @@ async function onClick(event) {
     return;
   }
 
+  if (action === "enable-notifications") {
+    void enableAppNotifications();
+    return;
+  }
+
   if (action === "sync-ru") {
     refreshRuMenu(false);
     return;
@@ -2386,6 +2859,18 @@ async function onClick(event) {
 
   if (action === "open-upload") {
     openUpload(button.dataset.uploadId || "", { inline: true });
+    return;
+  }
+
+  if (action === "set-admin-category") {
+    setState({
+      adminDraft: {
+        ...(state.adminDraft || createEmptyAdminDraft()),
+        category: normalizeAnnouncementCategory(button.dataset.category || ""),
+      },
+      adminError: "",
+      uploadError: "",
+    });
     return;
   }
 
@@ -3202,6 +3687,8 @@ async function refreshRuMenu(silent) {
       lastMenuSync: new Date().toISOString(),
       syncMessage: `Cardápio do dia sincronizado: ${result.menu.day}, ${formatDateShort(result.menu.date)}.`,
     });
+
+    void maybeShowMenuNotification(result.menu);
   } catch (error) {
     if (!silent) {
       setState({
@@ -3228,7 +3715,21 @@ function shouldRefreshRuMenu() {
     return true;
   }
 
+  if (toISO(new Date(lastSyncTime)) !== toISO(new Date())) {
+    return true;
+  }
+
   return (Date.now() - lastSyncTime) >= MENU_AUTO_REFRESH_MS;
+}
+
+function startMenuRefreshHeartbeat() {
+  if (menuRefreshHeartbeatId || typeof window === "undefined") {
+    return;
+  }
+
+  menuRefreshHeartbeatId = window.setInterval(() => {
+    refreshRuMenuIfNeeded(true);
+  }, MENU_REFRESH_HEARTBEAT_MS);
 }
 
 function buildHeroTitle(activeUpload, academicData, todayClasses, nextClass) {
@@ -3523,7 +4024,18 @@ function maybePromptForClassNotifications(action) {
     return;
   }
 
-  if (["close-sidebar", "toggle-sidebar", "logout", "reload-app"].includes(action)) {
+  if ([
+    "close-sidebar",
+    "toggle-sidebar",
+    "logout",
+    "reload-app",
+    "enable-notifications",
+    "admin-refresh",
+    "set-admin-category",
+    "save-admin-announcement",
+    "toggle-admin-announcement",
+    "delete-admin-announcement",
+  ].includes(action)) {
     return;
   }
 
@@ -3547,6 +4059,103 @@ async function requestClassNotificationPermission() {
   } catch (error) {
     void syncUserPreferences();
     return "default";
+  }
+}
+
+async function enableAppNotifications() {
+  if (!supportsClassNotifications()) {
+    setState({
+      uploadError: "Este navegador nao oferece suporte as notificacoes do app.",
+      uploadMessage: "",
+    });
+    return;
+  }
+
+  if (Notification.permission === "denied") {
+    setState({
+      uploadError: "As notificacoes estao bloqueadas neste navegador. Libere a permissao do site nas configuracoes do navegador e recarregue o app.",
+      uploadMessage: "",
+    });
+    void syncUserPreferences();
+    return;
+  }
+
+  const permission = await requestClassNotificationPermission();
+
+  if (permission === "granted") {
+    setState({
+      uploadError: "",
+      uploadMessage: "",
+    });
+    void maybeShowMenuNotification(state.menu[0] || null);
+    syncClassNotifications();
+    return;
+  }
+
+  if (permission === "denied") {
+    setState({
+      uploadError: "As notificacoes foram bloqueadas. Libere a permissao do site para ativar os avisos.",
+      uploadMessage: "",
+    });
+    return;
+  }
+
+  setState({
+    uploadError: "Nao consegui concluir a permissao de notificacoes agora. Tente novamente.",
+    uploadMessage: "",
+  });
+}
+
+function isTodayMenu(menu) {
+  return Boolean(menu?.date) && String(menu.date) === toISO(new Date());
+}
+
+function buildMenuReminderKey(menu) {
+  return `menu|${String(menu?.date || toISO(new Date()))}`;
+}
+
+async function maybeShowMenuNotification(menu) {
+  if (!supportsClassNotifications() || Notification.permission !== "granted" || !state.user || !menu || !isTodayMenu(menu)) {
+    return;
+  }
+
+  const reminderKey = buildMenuReminderKey(menu);
+  if (hasReminderBeenShown(reminderKey)) {
+    return;
+  }
+
+  const bodyParts = [
+    `${menu.unit || "RU Abadia"} em ${formatDateShort(menu.date)}.`,
+    menu.mainDish ? `Prato principal: ${menu.mainDish}.` : "",
+    menu.dessert ? `Sobremesa: ${menu.dessert}.` : "",
+  ].filter(Boolean);
+
+  rememberReminderShown(reminderKey, toDate(menu.date));
+
+  try {
+    const registration = await registerNotificationServiceWorker();
+    if (registration?.showNotification) {
+      await registration.showNotification("Veja o cardapio do dia", {
+        body: bodyParts.join(" "),
+        icon: "./icon.png",
+        badge: "./icon.png",
+        tag: reminderKey,
+        renotify: false,
+        data: {
+          path: "/",
+          section: "menu",
+        },
+      });
+    } else {
+      const notification = new Notification("Veja o cardapio do dia", {
+        body: bodyParts.join(" "),
+        icon: "./icon.png",
+        tag: reminderKey,
+      });
+      window.setTimeout(() => notification.close(), 12000);
+    }
+  } catch (error) {
+    // Se falhar, evitamos interromper o app.
   }
 }
 
