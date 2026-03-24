@@ -9,6 +9,7 @@ const DOCUMENT_VIEWER_TAB_ID = "document-viewer";
 const ADMIN_TAB_ID = "admin";
 const INFO_TAB_ID = "info";
 const SUBSCRIPTION_TAB_ID = "subscription";
+const INFO_HUB_VISIBLE = false;
 const MENU_AUTO_REFRESH_MS = 6 * 60 * 60 * 1000;
 const MENU_REFRESH_HEARTBEAT_MS = 30 * 60 * 1000;
 const CLASS_NOTIFICATION_LEAD_MINUTES = 10;
@@ -361,7 +362,7 @@ const AGENDA_NAV_ITEMS = [
 
 const SIDEBAR_ITEMS = [
   { id: "home", label: "Inicio", icon: "home", action: "set-main-tab", tab: "home" },
-  { id: INFO_TAB_ID, label: "Informacoes", icon: "compass", action: "open-info-hub" },
+  ...(INFO_HUB_VISIBLE ? [{ id: INFO_TAB_ID, label: "Informacoes", icon: "compass", action: "open-info-hub" }] : []),
   { id: SUBSCRIPTION_TAB_ID, label: "Assinatura", icon: "star", action: "set-main-tab", tab: SUBSCRIPTION_TAB_ID },
   { id: REGISTRATION_TAB_ID, label: "Cadastro", icon: "user-plus", action: "open-registration" },
   { id: "student-card", label: "ID Digital", icon: "id-card", action: "open-student-card" },
@@ -417,8 +418,8 @@ let createSupabaseClient = null;
 clearPublicBootstrapData();
 
 let state = {
-  activeTab: uiState.activeTab || "home",
-  infoPageId: uiState.infoPageId || "",
+  activeTab: !INFO_HUB_VISIBLE && uiState.activeTab === INFO_TAB_ID ? "home" : (uiState.activeTab || "home"),
+  infoPageId: INFO_HUB_VISIBLE ? (uiState.infoPageId || "") : "",
   agendaTab: uiState.agendaTab || "today",
   sidebarOpen: Boolean(uiState.sidebarOpen),
   referenceDate: uiState.referenceDate || toISO(new Date()),
@@ -1884,7 +1885,9 @@ function renderMainPanel(activeUpload, registration = getRegistrationState()) {
   }
 
   if (state.activeTab === INFO_TAB_ID) {
-    return renderInfoHubPanel();
+    return INFO_HUB_VISIBLE
+      ? renderInfoHubPanel()
+      : (registration.isComplete ? renderHomePanel(activeUpload) : renderRegistrationPendingState(registration));
   }
 
   if (state.activeTab === SUBSCRIPTION_TAB_ID) {
@@ -2504,7 +2507,7 @@ function renderHomePanel(activeUpload) {
         ${renderHomeShortcut("calendar-day", "Hoje", "open-academic-tab", "today")}
         ${renderHomeShortcut("utensils", "RU", "open-academic-tab", "menu")}
         ${renderHomeShortcut("calendar-grid", "Semana", "open-academic-tab", "week")}
-        ${renderHomeShortcut("compass", "Infos", "open-info-hub", "")}
+        ${INFO_HUB_VISIBLE ? renderHomeShortcut("compass", "Infos", "open-info-hub", "") : ""}
         ${renderHomeShortcut("user-plus", "Cadastro", "open-registration", "")}
         ${getRegistrationState().studentCardUpload ? renderHomeShortcut("id-card", "ID Digital", "open-student-card", "") : ""}
         ${state.isAdmin ? renderHomeShortcut("shield", "Admin", "open-admin", "") : ""}
@@ -2512,7 +2515,7 @@ function renderHomePanel(activeUpload) {
 
       ${renderNotificationPanel(activeUpload)}
 
-      ${renderInfoHubHomePanel()}
+      ${INFO_HUB_VISIBLE ? renderInfoHubHomePanel() : ""}
 
       ${renderAnnouncementsFeed({ excludeIds: spotlightAnnouncement ? [spotlightAnnouncement.id] : [] })}
 
@@ -3359,7 +3362,7 @@ function getScreenTitle() {
   }
 
   if (state.activeTab === INFO_TAB_ID) {
-    return getInfoPage()?.title || "Informacoes";
+    return INFO_HUB_VISIBLE ? (getInfoPage()?.title || "Informacoes") : "Início";
   }
 
   if (state.activeTab === SUBSCRIPTION_TAB_ID) {
@@ -3555,6 +3558,18 @@ async function onClick(event) {
   }
 
   if (action === "open-info-hub") {
+    if (!INFO_HUB_VISIBLE) {
+      revokeActiveDocumentViewer();
+      setState({
+        activeTab: "home",
+        infoPageId: "",
+        sidebarOpen: false,
+        documentViewer: createEmptyDocumentViewerState(),
+        uploadError: "",
+        uploadMessage: "",
+      });
+      return;
+    }
     revokeActiveDocumentViewer();
     setState({
       activeTab: INFO_TAB_ID,
@@ -3568,6 +3583,18 @@ async function onClick(event) {
   }
 
   if (action === "open-info-page") {
+    if (!INFO_HUB_VISIBLE) {
+      revokeActiveDocumentViewer();
+      setState({
+        activeTab: "home",
+        infoPageId: "",
+        sidebarOpen: false,
+        documentViewer: createEmptyDocumentViewerState(),
+        uploadError: "",
+        uploadMessage: "",
+      });
+      return;
+    }
     revokeActiveDocumentViewer();
     setState({
       activeTab: INFO_TAB_ID,
@@ -3581,6 +3608,15 @@ async function onClick(event) {
   }
 
   if (action === "back-info-hub") {
+    if (!INFO_HUB_VISIBLE) {
+      setState({
+        activeTab: "home",
+        infoPageId: "",
+        sidebarOpen: false,
+        documentViewer: createEmptyDocumentViewerState(),
+      });
+      return;
+    }
     setState({
       activeTab: INFO_TAB_ID,
       infoPageId: "",
