@@ -33,6 +33,7 @@ const ANNOUNCEMENT_CATEGORY_OPTIONS = [
     description: "Comunicado geral para campanhas, chamadas e destaques do DA.",
     placement: "Destaque principal da tela inicial",
     tone: "announcement",
+    icon: "megaphone",
     spotlight: true,
   },
   {
@@ -41,6 +42,7 @@ const ANNOUNCEMENT_CATEGORY_OPTIONS = [
     description: "Recado rapido para a rotina dos alunos ao longo do dia.",
     placement: "Bloco de avisos rapidos",
     tone: "notice",
+    icon: "bell",
     spotlight: false,
   },
   {
@@ -49,6 +51,7 @@ const ANNOUNCEMENT_CATEGORY_OPTIONS = [
     description: "Mudancas de aula, provas, monitorias, prazos e orientacoes.",
     placement: "Bloco academico da home",
     tone: "academic",
+    icon: "graduation-cap",
     spotlight: false,
   },
   {
@@ -57,6 +60,7 @@ const ANNOUNCEMENT_CATEGORY_OPTIONS = [
     description: "Palestras, congressos, inscricoes e atividades abertas.",
     placement: "Bloco de eventos e anuncios",
     tone: "event",
+    icon: "sparkles",
     spotlight: true,
   },
   {
@@ -65,6 +69,7 @@ const ANNOUNCEMENT_CATEGORY_OPTIONS = [
     description: "Divulgacao de festas, integracoes e experiencias do curso.",
     placement: "Bloco de eventos e anuncios",
     tone: "party",
+    icon: "confetti",
     spotlight: false,
   },
   {
@@ -73,6 +78,7 @@ const ANNOUNCEMENT_CATEGORY_OPTIONS = [
     description: "Comunicado critico com prioridade maxima para aparecer primeiro.",
     placement: "Destaque principal da tela inicial",
     tone: "urgent",
+    icon: "siren",
     spotlight: true,
   },
 ];
@@ -103,6 +109,53 @@ const ANNOUNCEMENT_HOME_SECTIONS = [
     ],
   },
 ];
+const INFO_PAGE_VISUALS = {
+  denem: {
+    themeClass: "info-theme-civic",
+    kicker: "Movimento estudantil",
+    headline: "Representacao nacional conectada ao cotidiano da Medicina.",
+    chips: [
+      { icon: "megaphone", label: "Rede nacional" },
+      { icon: "users", label: "Sudeste-2" },
+    ],
+  },
+  "dce-uftm": {
+    themeClass: "info-theme-campus",
+    kicker: "Representacao local",
+    headline: "A voz estudantil da UFTM organizada dentro e fora do campus.",
+    chips: [
+      { icon: "building", label: "DCE-WAC" },
+      { icon: "badge-check", label: "Memoria politica" },
+    ],
+  },
+  "cvu-uberaba": {
+    themeClass: "info-theme-service",
+    kicker: "Espaco em atualizacao",
+    headline: "Bloco interno pronto para crescer assim que o DAGV publicar mais detalhes.",
+    chips: [
+      { icon: "map-pin", label: "Uberaba" },
+      { icon: "layers", label: "Area preparada" },
+    ],
+  },
+  "cepop-uftm": {
+    themeClass: "info-theme-access",
+    kicker: "Extensao e acesso",
+    headline: "Educacao popular com foco em ampliar o acesso ao ensino superior.",
+    chips: [
+      { icon: "book-open", label: "Educacao popular" },
+      { icon: "graduation-cap", label: "Preparacao ENEM" },
+    ],
+  },
+  "exigencias-horarias": {
+    themeClass: "info-theme-planning",
+    kicker: "Curriculo em revisao",
+    headline: "Leitura interna para acompanhar o status da matriz e futuras atualizacoes.",
+    chips: [
+      { icon: "hourglass", label: "Reelaboracao" },
+      { icon: "badge-check", label: "Espaco pronto" },
+    ],
+  },
+};
 const INFO_PAGES = [
   {
     id: "denem",
@@ -330,6 +383,15 @@ const defaultMenu = [
     dessert: "Banana",
     drink: "Goiaba",
   },
+];
+const MENU_SECTION_DEFINITIONS = [
+  { key: "mainDish", label: "Prato principal", icon: "utensils" },
+  { key: "option", label: "Opcao", icon: "leaf" },
+  { key: "garnish", label: "Guarnicao", icon: "layers" },
+  { key: "sides", label: "Acompanhamentos", icon: "badge-check" },
+  { key: "salads", label: "Saladas", icon: "leaf" },
+  { key: "dessert", label: "Sobremesa", icon: "star" },
+  { key: "drink", label: "Refresco", icon: "droplet" },
 ];
 
 const appElement = document.getElementById("app");
@@ -1420,6 +1482,10 @@ function getAnnouncementCategoryTone(category) {
   return getAnnouncementCategoryMeta(category).tone;
 }
 
+function getAnnouncementCategoryIcon(category) {
+  return getAnnouncementCategoryMeta(category).icon || "megaphone";
+}
+
 function getAnnouncementToneClass(category) {
   return `is-${getAnnouncementCategoryTone(category)}`;
 }
@@ -2176,9 +2242,12 @@ function renderAnnouncementSpotlight(item, options = {}) {
   return `
     <section class="paper-card announcement-spotlight ${getAnnouncementToneClass(item.category)}">
       <div class="announcement-spotlight-top">
-        <div>
-          <div class="section-topline">${escape(options.topline || "Anuncio em destaque")}</div>
-          <h2 class="section-title">${escape(item.title)}</h2>
+        <div class="announcement-title-wrap">
+          <span class="announcement-mark">${renderUiIcon(getAnnouncementCategoryIcon(item.category), "announcement-mark-icon")}</span>
+          <div>
+            <div class="section-topline">${escape(options.topline || "Anuncio em destaque")}</div>
+            <h2 class="section-title">${escape(item.title)}</h2>
+          </div>
         </div>
         <span class="tag">${escape(getAnnouncementCategoryLabel(item.category))}</span>
       </div>
@@ -2329,9 +2398,12 @@ function renderAdminAnnouncementItem(item) {
   return `
     <article class="upload-entry admin-announcement-entry ${getAnnouncementToneClass(item.category)}">
       <div class="upload-entry-top">
-        <div>
+        <div class="announcement-title-wrap">
+          <span class="announcement-mark is-compact">${renderUiIcon(getAnnouncementCategoryIcon(item.category), "announcement-mark-icon")}</span>
+          <div>
           <h3 class="schedule-title">${escape(item.title)}</h3>
           <div class="support-line">${escape(getAnnouncementCategoryLabel(item.category))} • ${escape(getAnnouncementStatusLabel(item))} • ${escape(getAnnouncementCategoryPlacement(item.category))}</div>
+          </div>
         </div>
         <span class="tag">${escape(getAnnouncementStatusLabel(item))}</span>
       </div>
@@ -2386,9 +2458,12 @@ function renderPublishedAnnouncementCard(item) {
   return `
     <article class="upload-entry admin-announcement-entry ${getAnnouncementToneClass(item.category)}">
       <div class="upload-entry-top">
-        <div>
+        <div class="announcement-title-wrap">
+          <span class="announcement-mark is-compact">${renderUiIcon(getAnnouncementCategoryIcon(item.category), "announcement-mark-icon")}</span>
+          <div>
           <h3 class="schedule-title">${escape(item.title)}</h3>
           <div class="support-line">${escape(getAnnouncementCategoryLabel(item.category))} • ${escape(getAnnouncementCategoryPlacement(item.category))}${item.startsAt ? ` • ${escape(formatShortDateTime(item.startsAt))}` : ""}</div>
+          </div>
         </div>
         <span class="tag">${escape(getAnnouncementStatusLabel(item))}</span>
       </div>
@@ -2560,15 +2635,22 @@ function renderInfoHubPanel() {
 }
 
 function renderInfoHubCard(item) {
+  const visual = getInfoPageVisual(item.id);
   return `
-    <button class="paper-card feature-card link-card link-card-button info-card-button" data-action="open-info-page" data-page-id="${escapeAttribute(item.id)}">
+    <button class="paper-card feature-card link-card link-card-button info-card-button ${visual.themeClass}" data-action="open-info-page" data-page-id="${escapeAttribute(item.id)}">
       <div class="link-card-top info-card-top">
-        <span class="tag">${escape(item.badge)}</span>
+        <div>
+          <div class="info-card-kicker">${escape(visual.kicker)}</div>
+          <span class="tag">${escape(item.badge)}</span>
+        </div>
         <span class="info-card-mark">${renderUiIcon(item.icon, "info-card-icon")}</span>
       </div>
-      <div>
+      <div class="info-card-copy">
         <h3 class="schedule-title">${escape(item.title)}</h3>
         <p class="section-copy">${escape(item.description)}</p>
+      </div>
+      <div class="info-card-chip-row">
+        ${visual.chips.map(renderInfoVisualChip).join("")}
       </div>
       <span class="link-hint">${escape(item.hint || "Abrir resumo interno")}</span>
     </button>
@@ -2576,9 +2658,10 @@ function renderInfoHubCard(item) {
 }
 
 function renderInfoPage(page) {
+  const visual = getInfoPageVisual(page.id);
   return `
     <section class="section-stack simple-stack">
-      <section class="paper-card simple-section">
+      <section class="paper-card simple-section info-page-shell ${visual.themeClass}">
         <div class="section-header-row">
           <div>
             <div class="section-topline">Informacoes do DAGV</div>
@@ -2591,14 +2674,21 @@ function renderInfoPage(page) {
           <div class="info-detail-copy">
             <div class="item-meta">
               <span class="tag">${escape(page.badge)}</span>
+              ${visual.chips.map(renderInfoVisualChip).join("")}
             </div>
+            <h3 class="info-detail-headline">${escape(visual.headline)}</h3>
             <p class="section-copy">${escape(page.description)}</p>
             <p class="portal-paragraph">${escape(page.summary)}</p>
           </div>
         </div>
+        <div class="info-highlight-grid">
+          ${renderInfoPageHighlight("compass", "Leitura nativa", "conteudo reorganizado dentro do app")}
+          ${renderInfoPageHighlight("layers", `${String(page.sections?.length || 0)} blocos`, "resumo direto para consulta rapida")}
+          ${renderInfoPageHighlight(page.notice ? "hourglass" : "badge-check", page.notice ? "Em expansao" : "Resumo consolidado", page.notice ? "aguardando mais texto no portal do DAGV" : "pagina pronta para leitura interna")}
+        </div>
       </section>
 
-      ${(page.sections || []).map(renderInfoPageSection).join("")}
+      ${(page.sections || []).map((section) => renderInfoPageSection(section, visual.themeClass)).join("")}
 
       ${page.notice ? `
         <section class="paper-card simple-section">
@@ -2609,14 +2699,20 @@ function renderInfoPage(page) {
   `;
 }
 
-function renderInfoPageSection(section) {
+function renderInfoPageSection(section, themeClass = "info-theme-default") {
+  const sectionIcon = getInfoSectionIcon(section);
   return `
-    <section class="paper-card simple-section">
-      <div class="section-topline">${escape(section.kicker || "Detalhe")}</div>
-      <h3 class="portal-heading">${escape(section.title)}</h3>
+    <section class="paper-card simple-section info-page-section ${themeClass}">
+      <div class="info-section-head">
+        <div class="info-section-mark">${renderUiIcon(sectionIcon, "info-section-icon")}</div>
+        <div>
+          <div class="section-topline">${escape(section.kicker || "Detalhe")}</div>
+          <h3 class="portal-heading">${escape(section.title)}</h3>
+        </div>
+      </div>
       <div class="portal-blocks" style="margin-top: 1rem;">
         ${(section.paragraphs || []).map((paragraph) => `<p class="portal-paragraph">${escape(paragraph)}</p>`).join("")}
-        ${(section.bullets || []).map((item) => `<div class="portal-list-item">${escape(item)}</div>`).join("")}
+        ${(section.bullets || []).map((item) => renderPortalListItem(item, sectionIcon)).join("")}
       </div>
     </section>
   `;
@@ -2624,6 +2720,71 @@ function renderInfoPageSection(section) {
 
 function getInfoPage(pageId = state.infoPageId) {
   return INFO_PAGES.find((item) => item.id === pageId) || null;
+}
+
+function getInfoPageVisual(pageId) {
+  return INFO_PAGE_VISUALS[pageId] || {
+    themeClass: "info-theme-default",
+    kicker: "Guia interno",
+    headline: "Conteudo reorganizado do portal do DAGV para leitura dentro do app.",
+    chips: [{ icon: "compass", label: "Resumo interno" }],
+  };
+}
+
+function renderInfoVisualChip(chip) {
+  return `
+    <span class="info-chip">
+      ${renderUiIcon(chip.icon || "circle", "info-chip-icon")}
+      <span>${escape(chip.label || "")}</span>
+    </span>
+  `;
+}
+
+function renderInfoPageHighlight(iconName, title, caption) {
+  return `
+    <div class="info-highlight">
+      <span class="info-highlight-mark">${renderUiIcon(iconName, "info-highlight-icon")}</span>
+      <div>
+        <strong>${escape(title)}</strong>
+        <span>${escape(caption)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function getInfoSectionIcon(section) {
+  const source = `${section?.kicker || ""} ${section?.title || ""}`.toLowerCase();
+  if (source.includes("contato")) {
+    return "phone";
+  }
+  if (source.includes("memoria")) {
+    return "badge-check";
+  }
+  if (source.includes("como funciona") || source.includes("organizacao")) {
+    return "layers";
+  }
+  if (source.includes("publico") || source.includes("equipe")) {
+    return "users";
+  }
+  if (source.includes("status") || source.includes("situacao")) {
+    return "hourglass";
+  }
+  if (source.includes("futuro") || source.includes("espaco pronto")) {
+    return "sparkles";
+  }
+  if (source.includes("uberaba")) {
+    return "map-pin";
+  }
+  return "compass";
+}
+
+function renderPortalListItem(item, iconName = "badge-check") {
+  return `
+    <div class="portal-list-item">
+      <span class="portal-list-mark">${renderUiIcon(iconName, "portal-list-icon")}</span>
+      <span>${escape(item)}</span>
+    </div>
+  `;
 }
 
 function renderExpansionLinksPanel() {
@@ -2928,20 +3089,44 @@ function renderUploadItem(item, activeUpload) {
 }
 
 function renderMenuCard(item) {
+  const menuSections = MENU_SECTION_DEFINITIONS.filter((definition) => hasTextContent(item?.[definition.key]));
   return `
     <article class="menu-card simple-menu-card">
       <div class="menu-top">
-        <h3 class="menu-title">${escape(item.unit)}</h3>
-        <span class="tag">${escape(formatDateShort(item.date))}</span>
+        <div>
+          <div class="menu-kicker">
+            <span class="menu-kicker-mark">${renderUiIcon("utensils", "menu-kicker-icon")}</span>
+            <span>${escape(item.unit)}</span>
+          </div>
+          <h3 class="menu-title">${escape(item.day || "Cardapio do dia")}</h3>
+        </div>
+        <div class="menu-top-meta">
+          <span class="tag">${escape(formatDateShort(item.date))}</span>
+          ${item.updatedAt ? `<span class="menu-meta-chip">${renderUiIcon("sparkles", "menu-meta-icon")}Atualizado</span>` : ""}
+        </div>
       </div>
-      <section class="menu-section"><h4>Prato principal</h4><p>${escape(item.mainDish)}</p></section>
-      <section class="menu-section"><h4>Opção</h4><p>${escape(item.option)}</p></section>
-      <section class="menu-section"><h4>Guarnição</h4><p>${escape(item.garnish)}</p></section>
-      <section class="menu-section"><h4>Acompanhamentos</h4><p>${escape(item.sides)}</p></section>
-      <section class="menu-section"><h4>Saladas</h4><p>${escape(item.salads)}</p></section>
-      <section class="menu-section"><h4>Sobremesa</h4><p>${escape(item.dessert)}</p></section>
-      <section class="menu-section"><h4>Refresco</h4><p>${escape(item.drink)}</p></section>
+      <div class="menu-detail-list">
+        ${menuSections.map((definition) => renderMenuSection(item, definition)).join("")}
+      </div>
+      ${item.sourceTitle ? `
+        <div class="menu-source">
+          <span class="menu-source-mark">${renderUiIcon("newspaper", "menu-source-icon")}</span>
+          <span>${escape(item.sourceTitle)}</span>
+        </div>
+      ` : ""}
     </article>
+  `;
+}
+
+function renderMenuSection(item, definition) {
+  return `
+    <section class="menu-section menu-section-rich">
+      <div class="menu-section-head">
+        <span class="menu-section-mark">${renderUiIcon(definition.icon, "menu-section-icon")}</span>
+        <h4>${escape(definition.label)}</h4>
+      </div>
+      <p>${escape(item?.[definition.key] || "Sem informacao")}</p>
+    </section>
   `;
 }
 
@@ -3023,6 +3208,11 @@ function renderUiIcon(iconName, className = "ui-icon") {
       <path d="M8 15v2.5a2 2 0 0 0 4 0V17"></path>
       <path d="M18 9.5a4 4 0 0 1 0 5"></path>
     `,
+    bell: `
+      <path d="M8 18h8"></path>
+      <path d="M10 21h4"></path>
+      <path d="M6 18c1-1 1.5-2.3 1.5-4v-2a4.5 4.5 0 1 1 9 0v2c0 1.7.5 3 1.5 4Z"></path>
+    `,
     building: `
       <path d="M4 20h16"></path>
       <path d="M6 20V8.5"></path>
@@ -3039,11 +3229,68 @@ function renderUiIcon(iconName, className = "ui-icon") {
       <path d="M4 6.5C4 5.7 4.7 5 5.5 5H10c1.2 0 2 .8 2 2v12c0-1.2-.8-2-2-2H5.5A1.5 1.5 0 0 0 4 18.5z"></path>
       <path d="M20 6.5C20 5.7 19.3 5 18.5 5H14c-1.2 0-2 .8-2 2v12c0-1.2.8-2 2-2h4.5c.8 0 1.5.7 1.5 1.5z"></path>
     `,
+    "graduation-cap": `
+      <path d="m3 9 9-4 9 4-9 4-9-4Z"></path>
+      <path d="M7 10.8V15c0 1.6 2.2 3 5 3s5-1.4 5-3v-4.2"></path>
+      <path d="M21 10v5"></path>
+    `,
     hourglass: `
       <path d="M7 4h10"></path>
       <path d="M7 20h10"></path>
       <path d="M8 4c0 3 2 4.5 4 6 2-1.5 4-3 4-6"></path>
       <path d="M8 20c0-3 2-4.5 4-6 2 1.5 4 3 4 6"></path>
+    `,
+    sparkles: `
+      <path d="m12 3 1.1 3.3L16.5 7.5l-3.4 1.2L12 12l-1.1-3.3L7.5 7.5l3.4-1.2Z"></path>
+      <path d="m18.5 13 .6 1.8 1.9.7-1.9.6-.6 1.9-.7-1.9-1.8-.6 1.8-.7Z"></path>
+      <path d="m5.5 14 .8 2.3 2.2.8-2.2.7-.8 2.2-.8-2.2-2.2-.7 2.2-.8Z"></path>
+    `,
+    confetti: `
+      <path d="M5 19c4-5 8-8 14-11"></path>
+      <path d="m12 5 2 4"></path>
+      <path d="m17 7 2-1"></path>
+      <path d="m8 8 1 2"></path>
+      <path d="m6 13 2 1"></path>
+      <path d="m15 15 1 2"></path>
+      <path d="M4 20h4"></path>
+    `,
+    siren: `
+      <path d="M8 16h8"></path>
+      <path d="M9 16V11a3 3 0 1 1 6 0v5"></path>
+      <path d="M6 20h12"></path>
+      <path d="M12 3v2"></path>
+      <path d="m5.5 6.5 1.5 1"></path>
+      <path d="m18.5 6.5-1.5 1"></path>
+    `,
+    users: `
+      <circle cx="9" cy="9" r="2.5"></circle>
+      <circle cx="16.5" cy="10" r="2"></circle>
+      <path d="M4.5 19c0-2.5 2-4.5 4.5-4.5s4.5 2 4.5 4.5"></path>
+      <path d="M13.5 18c.3-1.9 1.9-3.5 4-3.5 1.2 0 2.3.4 3.1 1.2"></path>
+    `,
+    "badge-check": `
+      <path d="M12 3.5 14.5 5l3-.3.8 2.9 2 2.2-1.4 2.6.2 3-2.8 1-1.7 2.5-2.6-1.3-2.6 1.3-1.7-2.5-2.8-1 .2-3L3.7 9.8l2-2.2.8-2.9 3 .3Z"></path>
+      <path d="m9.2 12.3 1.8 1.8 3.8-3.8"></path>
+    `,
+    layers: `
+      <path d="m12 4 8 4-8 4-8-4 8-4Z"></path>
+      <path d="m4 12 8 4 8-4"></path>
+      <path d="m4 16 8 4 8-4"></path>
+    `,
+    leaf: `
+      <path d="M19 5c-5.5 0-10 4.5-10 10v4"></path>
+      <path d="M5 19c0-7.5 5.5-12 14-12 0 8.5-4.5 14-12 14"></path>
+    `,
+    star: `
+      <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.2l-5.5 2.9 1-6.2L3 9.6l6.2-.9Z"></path>
+    `,
+    droplet: `
+      <path d="M12 3s5 5.4 5 9a5 5 0 1 1-10 0c0-3.6 5-9 5-9Z"></path>
+    `,
+    phone: `
+      <path d="M7.5 4.5h9a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2Z"></path>
+      <path d="M10 7.5h4"></path>
+      <path d="M11 16.5h2"></path>
     `,
     link: `
       <path d="M10 14 14 10"></path>
@@ -3159,6 +3406,10 @@ function renderSimpleInfoRow(label, value) {
       <strong>${escape(value)}</strong>
     </div>
   `;
+}
+
+function hasTextContent(value) {
+  return String(value || "").trim().length > 0;
 }
 
 function getScheduleUploads() {
