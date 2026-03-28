@@ -439,7 +439,7 @@ const AGENDA_NAV_ITEMS = [
 const SIDEBAR_ITEMS = [
   { id: "home", label: "Inicio", icon: "home", action: "set-main-tab", tab: "home" },
   ...(INFO_HUB_VISIBLE ? [{ id: INFO_TAB_ID, label: "Informacoes", icon: "compass", action: "open-info-hub" }] : []),
-  { id: SUBSCRIPTION_TAB_ID, label: "Loja", icon: "shopping-bag", action: "set-main-tab", tab: SUBSCRIPTION_TAB_ID },
+  { id: SUBSCRIPTION_TAB_ID, label: "Loja", icon: "storefront", action: "set-main-tab", tab: SUBSCRIPTION_TAB_ID },
   { id: REGISTRATION_TAB_ID, label: "Cadastro", icon: "user-plus", action: "open-registration" },
   { id: "student-card", label: "ID Digital", icon: "id-card", action: "open-student-card" },
   { id: "today", label: "Grade Horaria", icon: "calendar-day", action: "open-academic-tab", tab: "today" },
@@ -526,6 +526,7 @@ let state = {
   adminError: "",
   adminStats: createEmptyAdminStats(),
   adminDraft: createEmptyAdminDraft(),
+  adminProductDraft: createEmptyAdminProductDraft(),
   marketplaceItems: Array.isArray(uiState.marketplaceItems) ? uiState.marketplaceItems.map((item) => normalizeMarketplaceRow(item)) : [],
   marketplaceLoading: false,
   marketplaceError: "",
@@ -670,6 +671,7 @@ async function handleSupabaseSession(session) {
       adminError: "",
       adminStats: createEmptyAdminStats(),
       adminDraft: createEmptyAdminDraft(),
+      adminProductDraft: createEmptyAdminProductDraft(),
       marketplaceItems: [],
       marketplaceLoading: false,
       marketplaceError: "",
@@ -712,6 +714,7 @@ async function handleSupabaseSession(session) {
     adminError: "",
     adminStats: createEmptyAdminStats(),
     adminDraft: createEmptyAdminDraft(),
+    adminProductDraft: createEmptyAdminProductDraft(),
     marketplaceItems: [],
     marketplaceLoading: true,
     marketplaceError: "",
@@ -1301,6 +1304,17 @@ function createEmptyAdminStats() {
     completedRegistrations: 0,
     notificationSubscribers: 0,
     standaloneUsers: 0,
+  };
+}
+
+function createEmptyAdminProductDraft() {
+  return {
+    title: "",
+    description: "",
+    price: "",
+    location: "",
+    contactUrl: "",
+    isPublished: true,
   };
 }
 
@@ -2652,9 +2666,16 @@ function renderHomeAnnouncementSpotlight(item) {
 
 function renderAdminPanel() {
   const draft = state.adminDraft || createEmptyAdminDraft();
+  const adminProductDraft = state.adminProductDraft || createEmptyAdminProductDraft();
   const announcements = [...state.announcements]
     .sort((left, right) => String(right.createdAt || "").localeCompare(String(left.createdAt || "")));
   const buckets = buildAdminAnnouncementBuckets(announcements);
+  const adminProductItems = sortMarketplaceItems(
+    (state.marketplaceItems || [])
+      .map((item) => normalizeMarketplaceRow(item, state.user?.uid || ""))
+      .filter((item) => item.type === "product"),
+  );
+  const activeAdminProductItems = adminProductItems.filter((item) => item.isActive);
 
   return `
     <section class="section-stack simple-stack">
@@ -2682,6 +2703,78 @@ function renderAdminPanel() {
           ${renderRegistrationStatusCard("Rascunhos e arquivo", String(buckets.library.length), "itens fora do feed atual")}
         </div>
         ${state.adminError ? `<div class="toast is-warning" style="margin-top: 1rem;">${escape(state.adminError)}</div>` : ""}
+      </section>
+
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Loja interna</div>
+            <h2 class="section-title">Cadastro de produtos</h2>
+          </div>
+          <span class="tag">${String(adminProductItems.length)} produtos</span>
+        </div>
+        <p class="section-copy">Cadastre produtos institucionais ou internos do curso direto pelo perfil de admin. Eles entram na loja do app para os alunos.</p>
+        <div class="simple-meta-grid admin-announcement-summary" style="margin-top: 1rem;">
+          ${renderRegistrationStatusCard("Produtos ativos", String(activeAdminProductItems.length), "visiveis na loja agora")}
+          ${renderRegistrationStatusCard("Rascunhos/pausados", String(Math.max(0, adminProductItems.length - activeAdminProductItems.length)), "fora do mural no momento")}
+          ${renderRegistrationStatusCard("Contato padrao", state.user?.email || "sem email", "usado quando nenhum link externo for informado")}
+        </div>
+        ${state.marketplaceError ? `<div class="toast is-warning" style="margin-top: 1rem;">${escape(state.marketplaceError)}</div>` : ""}
+        <div class="admin-compose-grid" style="margin-top: 1rem;">
+          <div class="form-grid">
+            <div class="inline-field">
+              <label for="adminProductDraftTitle">Nome do produto</label>
+              <input id="adminProductDraftTitle" type="text" maxlength="90" value="${escapeAttribute(adminProductDraft.title)}" placeholder="Ex.: Camiseta oficial da turma" />
+            </div>
+            <div class="inline-field">
+              <label for="adminProductDraftDescription">Descricao</label>
+              <textarea id="adminProductDraftDescription" rows="5" maxlength="500" placeholder="Detalhe o produto, estoque, tamanhos, retirada e qualquer observacao importante.">${escape(adminProductDraft.description)}</textarea>
+            </div>
+            <div class="simple-meta-grid">
+              <div class="inline-field">
+                <label for="adminProductDraftPrice">Preco</label>
+                <input id="adminProductDraftPrice" type="number" min="0" step="0.01" inputmode="decimal" value="${escapeAttribute(adminProductDraft.price)}" placeholder="0,00" />
+              </div>
+              <div class="inline-field">
+                <label for="adminProductDraftLocation">Local ou retirada</label>
+                <input id="adminProductDraftLocation" type="text" maxlength="80" value="${escapeAttribute(adminProductDraft.location)}" placeholder="Ex.: Sala do DA ou campus Centro" />
+              </div>
+            </div>
+            <div class="inline-field">
+              <label for="adminProductDraftContactUrl">Link de compra ou contato</label>
+              <input id="adminProductDraftContactUrl" type="url" value="${escapeAttribute(adminProductDraft.contactUrl)}" placeholder="https://wa.me/... ou checkout interno" />
+            </div>
+            <label class="checkbox-field" for="adminProductDraftPublished">
+              <input id="adminProductDraftPublished" type="checkbox" ${adminProductDraft.isPublished ? "checked" : ""} />
+              <span>Publicar imediatamente na loja</span>
+            </label>
+            <div class="button-row">
+              <button class="secondary" data-action="save-admin-product" ${state.marketplaceLoading || !state.marketplaceRemoteReady ? "disabled" : ""}>${state.marketplaceLoading ? "Salvando..." : "Cadastrar produto"}</button>
+              <button class="ghost" data-action="marketplace-refresh" ${state.marketplaceLoading ? "disabled" : ""}>Atualizar produtos</button>
+            </div>
+            ${!state.marketplaceRemoteReady ? `<div class="support-line">Aplique o novo schema do Supabase para liberar o cadastro real de produtos.</div>` : ""}
+          </div>
+          <aside class="announcement-preview-shell marketplace-preview-shell">
+            <div class="section-topline">Previa do produto</div>
+            <h3 class="section-title">${escape(adminProductDraft.title || "Seu produto vai aparecer assim")}</h3>
+            ${renderAdminProductDraftPreview(adminProductDraft)}
+          </aside>
+        </div>
+      </section>
+
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Catalogo</div>
+            <h2 class="section-title">Produtos cadastrados na loja</h2>
+          </div>
+          <span class="tag">${String(adminProductItems.length)} itens</span>
+        </div>
+        <div class="marketplace-grid" style="margin-top: 1rem;">
+          ${adminProductItems.length
+            ? adminProductItems.map((item) => renderMarketplaceListingCard(item)).join("")
+            : `<div class="empty-state">Nenhum produto cadastrado ainda. Use o formulario acima para publicar o primeiro item da loja.</div>`}
+        </div>
       </section>
 
       <section class="paper-card simple-section">
@@ -2870,9 +2963,9 @@ function renderHomePanel(activeUpload) {
 
       <section class="home-shortcuts">
         ${renderHomeShortcut("calendar-day", "Hoje", "open-academic-tab", "today")}
+        ${renderHomeShortcut("storefront", "Loja", "set-main-tab", SUBSCRIPTION_TAB_ID)}
         ${renderHomeShortcut("utensils", "RU", "open-academic-tab", "menu")}
         ${renderHomeShortcut("calendar-grid", "Semana", "open-academic-tab", "week")}
-        ${renderHomeShortcut("shopping-bag", "Loja", "set-main-tab", SUBSCRIPTION_TAB_ID)}
         ${INFO_HUB_VISIBLE ? renderHomeShortcut("compass", "Infos", "open-info-hub", "") : ""}
         ${renderHomeShortcut("user-plus", "Cadastro", "open-registration", "")}
         ${getRegistrationState().studentCardUpload ? renderHomeShortcut("id-card", "ID Digital", "open-student-card", "") : ""}
@@ -3362,9 +3455,36 @@ function renderMarketplaceDraftPreview(draft) {
   `;
 }
 
+function renderAdminProductDraftPreview(draft) {
+  const previewItem = normalizeMarketplaceRow({
+    id: "preview-admin-product",
+    type: "product",
+    title: draft.title || "Nome do produto",
+    description: draft.description || "Descreva aqui o produto, os tamanhos disponiveis, a forma de retirada e qualquer detalhe importante para a comunidade.",
+    price_cents: parseMarketplacePriceToCents(draft.price),
+    location_label: draft.location || "Retirada a combinar",
+    contact_url: normalizeOptionalHttpUrl(draft.contactUrl || ""),
+    seller_display_name: state.user?.displayName || "Admin",
+    seller_email: state.user?.email || "",
+    is_active: draft.isPublished,
+    is_demo: true,
+  }, state.user?.uid || "");
+
+  return `
+    <div class="marketplace-preview-card">
+      ${renderMarketplaceListingCard(previewItem, { preview: true })}
+      <div class="simple-list" style="margin-top: 1rem;">
+        ${renderSimpleInfoRow("Status", draft.isPublished ? "Publicado" : "Pausado")}
+        ${renderSimpleInfoRow("Contato", normalizeOptionalHttpUrl(draft.contactUrl || "") ? "Link externo" : (state.user?.email || "email da conta"))}
+      </div>
+    </div>
+  `;
+}
+
 function renderMarketplaceListingCard(item, options = {}) {
   const contactHref = buildMarketplaceContactHref(item);
   const isPreview = Boolean(options.preview);
+  const canManageListing = !item.isDemo && !isPreview && (item.isOwn || state.isAdmin);
   const cardClasses = [
     "paper-card",
     "feature-card",
@@ -3403,8 +3523,8 @@ function renderMarketplaceListingCard(item, options = {}) {
           : contactHref
             ? `<a class="ghost link-button" href="${escapeAttribute(contactHref)}" target="${contactHref.startsWith("mailto:") ? "_self" : "_blank"}" rel="noreferrer">${escape(getMarketplaceTypeCta(item.type))}</a>`
             : `<span class="tag">Contato pela conta</span>`}
-        ${item.isOwn && !item.isDemo && !isPreview ? `<button class="ghost" data-action="toggle-marketplace-listing" data-listing-id="${escapeAttribute(item.id)}">${item.isActive ? "Pausar" : "Reativar"}</button>` : ""}
-        ${item.isOwn && !item.isDemo && !isPreview ? `<button class="ghost" data-action="delete-marketplace-listing" data-listing-id="${escapeAttribute(item.id)}">Excluir</button>` : ""}
+        ${canManageListing ? `<button class="ghost" data-action="toggle-marketplace-listing" data-listing-id="${escapeAttribute(item.id)}">${item.isActive ? "Pausar" : "Reativar"}</button>` : ""}
+        ${canManageListing ? `<button class="ghost" data-action="delete-marketplace-listing" data-listing-id="${escapeAttribute(item.id)}">Excluir</button>` : ""}
       </div>
     </article>
   `;
@@ -3835,6 +3955,13 @@ function renderUiIcon(iconName, className = "ui-icon") {
       <path d="m18.5 13 .6 1.8 1.9.7-1.9.6-.6 1.9-.7-1.9-1.8-.6 1.8-.7Z"></path>
       <path d="m5.5 14 .8 2.3 2.2.8-2.2.7-.8 2.2-.8-2.2-2.2-.7 2.2-.8Z"></path>
     `,
+    storefront: `
+      <path d="M4 10.5h16"></path>
+      <path d="M5 10.5 6.2 5h11.6l1.2 5.5"></path>
+      <path d="M6.5 10.5V19h11V10.5"></path>
+      <path d="M10 19v-5h4v5"></path>
+      <path d="M7.5 5h9"></path>
+    `,
     "shopping-bag": `
       <path d="M6 8h12l-1 11H7L6 8Z"></path>
       <path d="M9 8a3 3 0 0 1 6 0"></path>
@@ -4257,6 +4384,7 @@ async function onClick(event) {
   if (action === "admin-refresh") {
     if (state.isAdmin) {
       void refreshAdminDashboard(false);
+      void refreshMarketplaceListings(true);
     }
     return;
   }
@@ -4355,6 +4483,11 @@ async function onClick(event) {
     return;
   }
 
+  if (action === "save-admin-product") {
+    void saveAdminProduct();
+    return;
+  }
+
   if (action === "toggle-marketplace-listing") {
     void toggleMarketplaceListingActive(button.dataset.listingId || "");
     return;
@@ -4411,6 +4544,11 @@ function onInput(event) {
     return;
   }
 
+  if (String(event.target.id || "").startsWith("adminProductDraft")) {
+    updateAdminProductDraftFromEvent(event.target);
+    return;
+  }
+
   if (String(event.target.id || "").startsWith("marketplaceDraft")) {
     updateMarketplaceDraftFromEvent(event.target);
     return;
@@ -4446,6 +4584,11 @@ function onChange(event) {
     return;
   }
 
+  if (String(event.target.id || "").startsWith("adminProductDraft")) {
+    updateAdminProductDraftFromEvent(event.target);
+    return;
+  }
+
   if (String(event.target.id || "").startsWith("adminDraft")) {
     updateAdminDraftFromEvent(event.target);
   }
@@ -4475,6 +4618,7 @@ async function logout() {
       adminRole: "",
       adminStats: createEmptyAdminStats(),
       adminDraft: createEmptyAdminDraft(),
+      adminProductDraft: createEmptyAdminProductDraft(),
       marketplaceItems: [],
       marketplaceLoading: false,
       marketplaceError: "",
@@ -4516,6 +4660,7 @@ async function logout() {
       marketplaceError: "",
       marketplaceRemoteReady: false,
       marketplaceDraft: createEmptyMarketplaceDraft(),
+      adminProductDraft: createEmptyAdminProductDraft(),
       marketplaceFilterType: "all",
       marketplaceFilterQuery: "",
       marketplaceOnlyMine: false,
@@ -4912,6 +5057,32 @@ function updateMarketplaceDraftFromEvent(target) {
   }, { render: false });
 }
 
+function updateAdminProductDraftFromEvent(target) {
+  const draft = state.adminProductDraft || createEmptyAdminProductDraft();
+  const nextDraft = { ...draft };
+  const targetId = String(target?.id || "");
+
+  if (targetId === "adminProductDraftTitle") {
+    nextDraft.title = String(target.value || "");
+  } else if (targetId === "adminProductDraftDescription") {
+    nextDraft.description = String(target.value || "");
+  } else if (targetId === "adminProductDraftPrice") {
+    nextDraft.price = String(target.value || "");
+  } else if (targetId === "adminProductDraftLocation") {
+    nextDraft.location = String(target.value || "");
+  } else if (targetId === "adminProductDraftContactUrl") {
+    nextDraft.contactUrl = String(target.value || "");
+  } else if (targetId === "adminProductDraftPublished") {
+    nextDraft.isPublished = Boolean(target.checked);
+  }
+
+  setState({
+    adminProductDraft: nextDraft,
+    marketplaceError: "",
+    uploadError: "",
+  }, { render: false });
+}
+
 async function saveMarketplaceListing() {
   if (!state.user || !services.supabase) {
     setState({
@@ -4982,6 +5153,85 @@ async function saveMarketplaceListing() {
     setState({
       marketplaceLoading: false,
       marketplaceError: `Nao consegui publicar este anuncio: ${describeSupabaseError(error)}`,
+      uploadMessage: "",
+    });
+  }
+}
+
+async function saveAdminProduct() {
+  if (!state.isAdmin || !state.user || !services.supabase) {
+    return;
+  }
+
+  if (!state.marketplaceRemoteReady) {
+    setState({
+      marketplaceError: "A publicacao real fica liberada assim que o novo schema do Supabase for aplicado.",
+      uploadError: "",
+      uploadMessage: "",
+    });
+    return;
+  }
+
+  const draft = state.adminProductDraft || createEmptyAdminProductDraft();
+  const payload = buildMarketplaceListingPayload({
+    type: "product",
+    title: draft.title,
+    description: draft.description,
+    price: draft.price,
+    location: draft.location,
+    contactUrl: draft.contactUrl,
+  });
+
+  if (!payload.ok) {
+    setState({
+      marketplaceError: payload.message,
+      uploadError: "",
+      uploadMessage: "",
+    });
+    return;
+  }
+
+  setState({
+    marketplaceLoading: true,
+    marketplaceError: "",
+    uploadError: "",
+    uploadMessage: "Cadastrando produto na loja interna...",
+  });
+
+  try {
+    const now = new Date().toISOString();
+    const { error } = await services.supabase
+      .from("marketplace_listings")
+      .insert({
+        owner_uid: state.user.uid,
+        type: "product",
+        title: payload.value.title,
+        description: payload.value.description,
+        price_cents: payload.value.priceCents,
+        location_label: payload.value.location,
+        contact_url: payload.value.contactUrl,
+        seller_display_name: state.user.displayName || state.profile?.displayName || "Admin",
+        seller_email: state.user.email || state.profile?.email || "",
+        is_active: Boolean(draft.isPublished),
+        updated_at: now,
+      });
+
+    if (error) {
+      throw error;
+    }
+
+    await refreshMarketplaceListings(true);
+    setState({
+      adminProductDraft: createEmptyAdminProductDraft(),
+      marketplaceLoading: false,
+      marketplaceError: "",
+      uploadError: "",
+      uploadMessage: "Produto cadastrado com sucesso na loja interna.",
+    });
+  } catch (error) {
+    setState({
+      marketplaceLoading: false,
+      marketplaceError: `Nao consegui cadastrar este produto: ${describeSupabaseError(error)}`,
       uploadMessage: "",
     });
   }
