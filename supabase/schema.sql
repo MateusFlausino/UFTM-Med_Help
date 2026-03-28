@@ -53,6 +53,26 @@ create table if not exists public.admin_announcements (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.marketplace_listings (
+  id uuid primary key default gen_random_uuid(),
+  owner_uid uuid not null references auth.users(id) on delete cascade,
+  type text not null default 'product',
+  title text not null,
+  description text not null default '',
+  price_cents integer not null default 0,
+  location_label text not null default '',
+  contact_url text not null default '',
+  seller_display_name text not null default '',
+  seller_email text not null default '',
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  constraint marketplace_listings_type_check
+    check (type in ('product', 'ticket', 'service')),
+  constraint marketplace_listings_price_check
+    check (price_cents >= 0)
+);
+
 alter table public.admin_announcements
   drop constraint if exists admin_announcements_category_check;
 
@@ -88,6 +108,12 @@ create index if not exists uploads_owner_uid_uploaded_at_idx
 create index if not exists admin_announcements_category_published_idx
   on public.admin_announcements (category, is_published, starts_at desc, created_at desc);
 
+create index if not exists marketplace_listings_active_created_idx
+  on public.marketplace_listings (is_active, created_at desc);
+
+create index if not exists marketplace_listings_owner_updated_idx
+  on public.marketplace_listings (owner_uid, updated_at desc);
+
 create index if not exists user_preferences_last_seen_idx
   on public.user_preferences (last_seen_at desc);
 
@@ -112,6 +138,7 @@ alter table public.profiles enable row level security;
 alter table public.uploads enable row level security;
 alter table public.admin_users enable row level security;
 alter table public.admin_announcements enable row level security;
+alter table public.marketplace_listings enable row level security;
 alter table public.user_preferences enable row level security;
 
 drop policy if exists profiles_select_own on public.profiles;
@@ -214,6 +241,48 @@ create policy admin_announcements_delete_admin
   for delete
   to authenticated
   using (public.is_admin());
+
+drop policy if exists marketplace_listings_select_visible on public.marketplace_listings;
+create policy marketplace_listings_select_visible
+  on public.marketplace_listings
+  for select
+  to authenticated
+  using (
+    is_active
+    or auth.uid() = owner_uid
+    or public.is_admin()
+  );
+
+drop policy if exists marketplace_listings_insert_own on public.marketplace_listings;
+create policy marketplace_listings_insert_own
+  on public.marketplace_listings
+  for insert
+  to authenticated
+  with check (auth.uid() = owner_uid);
+
+drop policy if exists marketplace_listings_update_own_or_admin on public.marketplace_listings;
+create policy marketplace_listings_update_own_or_admin
+  on public.marketplace_listings
+  for update
+  to authenticated
+  using (
+    auth.uid() = owner_uid
+    or public.is_admin()
+  )
+  with check (
+    auth.uid() = owner_uid
+    or public.is_admin()
+  );
+
+drop policy if exists marketplace_listings_delete_own_or_admin on public.marketplace_listings;
+create policy marketplace_listings_delete_own_or_admin
+  on public.marketplace_listings
+  for delete
+  to authenticated
+  using (
+    auth.uid() = owner_uid
+    or public.is_admin()
+  );
 
 drop policy if exists user_preferences_select_own on public.user_preferences;
 create policy user_preferences_select_own

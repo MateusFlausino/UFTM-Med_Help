@@ -345,6 +345,82 @@ const EXPANSION_LINKS = [
     badge: "Comunidade",
   },
 ];
+const MARKETPLACE_LISTING_TYPES = [
+  {
+    id: "product",
+    label: "Produto",
+    badge: "Produtos",
+    description: "Jalecos, livros, materiais, kits e itens usados do curso.",
+    cta: "Tenho interesse",
+    icon: "shopping-bag",
+  },
+  {
+    id: "ticket",
+    label: "Ingresso",
+    badge: "Ingressos",
+    description: "Festas, congressos, palestras, open bar e eventos internos.",
+    cta: "Quero reservar",
+    icon: "ticket",
+  },
+  {
+    id: "service",
+    label: "Servico",
+    badge: "Servicos",
+    description: "Aulas, design, entregas, apoio academico e combinados entre alunos.",
+    cta: "Quero combinar",
+    icon: "briefcase",
+  },
+];
+const MARKETPLACE_DEMO_ITEMS = [
+  {
+    id: "demo-jaleco-dagv",
+    owner_uid: "demo-marketplace",
+    type: "product",
+    title: "Jaleco do internato bordado",
+    description: "Peca nova, tamanho M, com bordado da Medicina e bolso interno reforcado.",
+    price_cents: 8900,
+    location_label: "Campus Centro",
+    contact_url: "",
+    seller_display_name: "Loja interna DAGV",
+    seller_email: "",
+    is_active: true,
+    created_at: "2026-03-24T15:00:00-03:00",
+    updated_at: "2026-03-24T15:00:00-03:00",
+    is_demo: true,
+  },
+  {
+    id: "demo-ingresso-medfolia",
+    owner_uid: "demo-marketplace",
+    type: "ticket",
+    title: "Ingresso MedFolia lote 2",
+    description: "Transferencia interna com nome ja regularizado. Entrego o comprovante na hora.",
+    price_cents: 5500,
+    location_label: "Transferencia digital",
+    contact_url: "",
+    seller_display_name: "Eventos da turma",
+    seller_email: "",
+    is_active: true,
+    created_at: "2026-03-23T19:30:00-03:00",
+    updated_at: "2026-03-23T19:30:00-03:00",
+    is_demo: true,
+  },
+  {
+    id: "demo-monitoria-semiologia",
+    owner_uid: "demo-marketplace",
+    type: "service",
+    title: "Plantao de revisao para semiologia",
+    description: "Revisao em dupla ou trio, presencial no campus ou por chamada, com mapa de conduta.",
+    price_cents: 3500,
+    location_label: "Centro Educacional / online",
+    contact_url: "",
+    seller_display_name: "Rede de monitoria",
+    seller_email: "",
+    is_active: true,
+    created_at: "2026-03-22T11:15:00-03:00",
+    updated_at: "2026-03-22T11:15:00-03:00",
+    is_demo: true,
+  },
+];
 const PENDING_REGISTRATION_MESSAGE = "Aguardando finalização do cadastro. Envie a grade horária e o link da carteirinha estudantil para liberar o app.";
 
 const UI_STORAGE_KEY = "uftm-mobile-local-ui-v1";
@@ -363,7 +439,7 @@ const AGENDA_NAV_ITEMS = [
 const SIDEBAR_ITEMS = [
   { id: "home", label: "Inicio", icon: "home", action: "set-main-tab", tab: "home" },
   ...(INFO_HUB_VISIBLE ? [{ id: INFO_TAB_ID, label: "Informacoes", icon: "compass", action: "open-info-hub" }] : []),
-  { id: SUBSCRIPTION_TAB_ID, label: "Assinatura", icon: "star", action: "set-main-tab", tab: SUBSCRIPTION_TAB_ID },
+  { id: SUBSCRIPTION_TAB_ID, label: "Loja", icon: "shopping-bag", action: "set-main-tab", tab: SUBSCRIPTION_TAB_ID },
   { id: REGISTRATION_TAB_ID, label: "Cadastro", icon: "user-plus", action: "open-registration" },
   { id: "student-card", label: "ID Digital", icon: "id-card", action: "open-student-card" },
   { id: "today", label: "Grade Horaria", icon: "calendar-day", action: "open-academic-tab", tab: "today" },
@@ -450,6 +526,14 @@ let state = {
   adminError: "",
   adminStats: createEmptyAdminStats(),
   adminDraft: createEmptyAdminDraft(),
+  marketplaceItems: Array.isArray(uiState.marketplaceItems) ? uiState.marketplaceItems.map((item) => normalizeMarketplaceRow(item)) : [],
+  marketplaceLoading: false,
+  marketplaceError: "",
+  marketplaceRemoteReady: false,
+  marketplaceDraft: createEmptyMarketplaceDraft(),
+  marketplaceFilterType: normalizeMarketplaceFilterType(uiState.marketplaceFilterType || "all"),
+  marketplaceFilterQuery: String(uiState.marketplaceFilterQuery || ""),
+  marketplaceOnlyMine: Boolean(uiState.marketplaceOnlyMine),
 };
 
 appElement.addEventListener("click", onClick);
@@ -586,6 +670,14 @@ async function handleSupabaseSession(session) {
       adminError: "",
       adminStats: createEmptyAdminStats(),
       adminDraft: createEmptyAdminDraft(),
+      marketplaceItems: [],
+      marketplaceLoading: false,
+      marketplaceError: "",
+      marketplaceRemoteReady: false,
+      marketplaceDraft: createEmptyMarketplaceDraft(),
+      marketplaceFilterType: "all",
+      marketplaceFilterQuery: "",
+      marketplaceOnlyMine: false,
       offlineAccess: false,
     });
     return;
@@ -620,14 +712,20 @@ async function handleSupabaseSession(session) {
     adminError: "",
     adminStats: createEmptyAdminStats(),
     adminDraft: createEmptyAdminDraft(),
+    marketplaceItems: [],
+    marketplaceLoading: true,
+    marketplaceError: "",
+    marketplaceRemoteReady: false,
+    marketplaceDraft: createEmptyMarketplaceDraft(),
   });
 
   try {
     await upsertSupabaseProfile(userData);
-    const [{ profile, uploads }, adminAccess, announcementsResult] = await Promise.all([
+    const [{ profile, uploads }, adminAccess, announcementsResult, marketplaceResult] = await Promise.all([
       loadRemoteAccountData(userData.uid),
       resolveAdminAccess(userData),
       loadAnnouncements(),
+      loadMarketplaceListings(userData.uid),
     ]);
     const resolvedAdminAccess = adminAccess.isAdmin ? adminAccess : configuredAdminAccess;
     const registrationComplete = hasCompletedRegistration(uploads, profile);
@@ -654,6 +752,10 @@ async function handleSupabaseSession(session) {
     adminLoading: false,
     adminError: "",
     adminStats: createEmptyAdminStats(),
+    marketplaceItems: marketplaceResult.items,
+    marketplaceLoading: false,
+    marketplaceError: marketplaceResult.error,
+    marketplaceRemoteReady: marketplaceResult.remoteReady,
     studentCardUrlDraft: getStudentCardLinkUrl(getPrimaryStudentCardUploadFromUploads(uploads)),
       activeTab: registrationComplete || resolvedAdminAccess.isAdmin ? nextActiveTab : REGISTRATION_TAB_ID,
       agendaTab: registrationComplete ? state.agendaTab : "today",
@@ -686,6 +788,7 @@ async function handleSupabaseSession(session) {
       uploadMessage: "",
       announcementsLoading: false,
       adminLoading: false,
+      marketplaceLoading: false,
     });
   }
 }
@@ -1201,6 +1304,76 @@ function createEmptyAdminStats() {
   };
 }
 
+function createEmptyMarketplaceDraft() {
+  return {
+    type: MARKETPLACE_LISTING_TYPES[0].id,
+    title: "",
+    description: "",
+    price: "",
+    location: "",
+    contactUrl: "",
+  };
+}
+
+function isMarketplaceType(value) {
+  return MARKETPLACE_LISTING_TYPES.some((item) => item.id === String(value || "").trim());
+}
+
+function normalizeMarketplaceType(value) {
+  return isMarketplaceType(value) ? String(value).trim() : MARKETPLACE_LISTING_TYPES[0].id;
+}
+
+function normalizeMarketplaceFilterType(value) {
+  const normalized = String(value || "").trim();
+  return normalized === "all" || isMarketplaceType(normalized) ? normalized : "all";
+}
+
+function getMarketplaceTypeMeta(type) {
+  const normalized = normalizeMarketplaceType(type);
+  return MARKETPLACE_LISTING_TYPES.find((item) => item.id === normalized) || MARKETPLACE_LISTING_TYPES[0];
+}
+
+function getMarketplaceTypeLabel(type) {
+  return getMarketplaceTypeMeta(type).label;
+}
+
+function getMarketplaceTypeIcon(type) {
+  return getMarketplaceTypeMeta(type).icon || "shopping-bag";
+}
+
+function getMarketplaceTypeCta(type) {
+  return getMarketplaceTypeMeta(type).cta || "Tenho interesse";
+}
+
+function normalizeMarketplaceRow(row, viewerUid = "") {
+  const ownerUid = String(row?.owner_uid || row?.ownerUid || "");
+  const priceCents = Number.isFinite(Number(row?.price_cents ?? row?.priceCents))
+    ? Math.max(0, Math.round(Number(row?.price_cents ?? row?.priceCents)))
+    : 0;
+
+  return {
+    id: String(row?.id || ""),
+    ownerUid,
+    type: normalizeMarketplaceType(row?.type),
+    title: String(row?.title || "Anuncio interno"),
+    description: String(row?.description || ""),
+    priceCents,
+    location: String(row?.location_label || row?.location || ""),
+    contactUrl: normalizeOptionalHttpUrl(row?.contact_url || row?.contactUrl || ""),
+    sellerName: normalizePersonName(row?.seller_display_name || row?.sellerName || ""),
+    sellerEmail: normalizeEmail(row?.seller_email || row?.sellerEmail || ""),
+    isActive: row?.is_active !== false && row?.isActive !== false,
+    createdAt: String(row?.created_at || row?.createdAt || ""),
+    updatedAt: String(row?.updated_at || row?.updatedAt || row?.created_at || row?.createdAt || ""),
+    isDemo: Boolean(row?.is_demo || row?.isDemo),
+    isOwn: Boolean(ownerUid && viewerUid && ownerUid === String(viewerUid)),
+  };
+}
+
+function createDemoMarketplaceItems(viewerUid = "") {
+  return MARKETPLACE_DEMO_ITEMS.map((item) => normalizeMarketplaceRow(item, viewerUid));
+}
+
 function isConfiguredAdminEmail(email) {
   return supabaseConfig.adminEmails.includes(normalizeEmail(email));
 }
@@ -1283,6 +1456,73 @@ async function loadAnnouncements() {
       error: `Não consegui carregar os avisos do app: ${describeSupabaseError(error)}`,
     };
   }
+}
+
+async function loadMarketplaceListings(userUid = state.user?.uid || "") {
+  if (!services.supabase) {
+    return {
+      items: [],
+      error: "",
+      remoteReady: false,
+    };
+  }
+
+  try {
+    const { data, error } = await services.supabase
+      .from("marketplace_listings")
+      .select("*")
+      .order("is_active", { ascending: false })
+      .order("created_at", { ascending: false });
+
+    if (error) {
+      throw error;
+    }
+
+    return {
+      items: sortMarketplaceItems((data || []).map((row) => normalizeMarketplaceRow(row, userUid))),
+      error: "",
+      remoteReady: true,
+    };
+  } catch (error) {
+    if (isMarketplaceFeatureUnavailableError(error)) {
+      return {
+        items: [],
+        error: "Aplique o novo schema.sql no Supabase para liberar anuncios reais da loja interna.",
+        remoteReady: false,
+      };
+    }
+
+    return {
+      items: [],
+      error: `Nao consegui carregar a loja agora: ${describeSupabaseError(error)}`,
+      remoteReady: false,
+    };
+  }
+}
+
+async function refreshMarketplaceListings(silent = false) {
+  if (!state.user || !services.supabase) {
+    return;
+  }
+
+  setState({
+    marketplaceLoading: true,
+    marketplaceError: "",
+    uploadError: "",
+    uploadMessage: silent ? state.uploadMessage : "Atualizando a loja interna...",
+  }, { render: !silent });
+
+  const result = await loadMarketplaceListings(state.user.uid);
+
+  setState({
+    marketplaceItems: result.items,
+    marketplaceLoading: false,
+    marketplaceError: result.error,
+    marketplaceRemoteReady: result.remoteReady,
+    uploadMessage: result.error
+      ? ""
+      : (silent ? state.uploadMessage : "Loja interna atualizada com sucesso."),
+  });
 }
 
 async function loadAdminStats() {
@@ -1587,6 +1827,119 @@ function normalizeOptionalHttpUrl(value) {
   }
 }
 
+function sortMarketplaceItems(items = []) {
+  return [...items].sort((left, right) => {
+    const activeDiff = Number(Boolean(right?.isActive)) - Number(Boolean(left?.isActive));
+    if (activeDiff !== 0) {
+      return activeDiff;
+    }
+
+    const ownDiff = Number(Boolean(right?.isOwn)) - Number(Boolean(left?.isOwn));
+    if (ownDiff !== 0) {
+      return ownDiff;
+    }
+
+    return String(right?.createdAt || "").localeCompare(String(left?.createdAt || ""));
+  });
+}
+
+function getMarketplaceDisplayItems() {
+  const viewerUid = state.user?.uid || "";
+  const remoteItems = sortMarketplaceItems(
+    (state.marketplaceItems || []).map((item) => normalizeMarketplaceRow(item, viewerUid)),
+  );
+
+  return remoteItems.length ? remoteItems : createDemoMarketplaceItems(viewerUid);
+}
+
+function isMarketplaceUsingDemoData(items = getMarketplaceDisplayItems()) {
+  return Boolean(items.length) && items.every((item) => item.isDemo);
+}
+
+function getVisibleMarketplaceItems(items = getMarketplaceDisplayItems()) {
+  const query = String(state.marketplaceFilterQuery || "").trim().toLowerCase();
+
+  return items.filter((item) => {
+    if (state.marketplaceOnlyMine && !item.isOwn) {
+      return false;
+    }
+
+    if (!state.marketplaceOnlyMine && !item.isActive && !item.isOwn) {
+      return false;
+    }
+
+    if (state.marketplaceFilterType !== "all" && item.type !== state.marketplaceFilterType) {
+      return false;
+    }
+
+    if (!query) {
+      return true;
+    }
+
+    const haystack = [
+      item.title,
+      item.description,
+      item.location,
+      item.sellerName,
+      getMarketplaceTypeLabel(item.type),
+    ].join(" ").toLowerCase();
+
+    return haystack.includes(query);
+  });
+}
+
+function parseMarketplacePriceToCents(value) {
+  const rawValue = String(value || "").trim();
+  const normalized = rawValue.includes(",") && rawValue.includes(".")
+    ? rawValue.replace(/\./g, "").replace(",", ".")
+    : rawValue.replace(",", ".");
+
+  if (!normalized) {
+    return 0;
+  }
+
+  const amount = Number(normalized);
+  if (!Number.isFinite(amount) || amount < 0) {
+    return -1;
+  }
+
+  return Math.round(amount * 100);
+}
+
+function formatMarketplacePrice(priceCents, type) {
+  const normalizedPrice = Number(priceCents || 0);
+  if (normalizedPrice <= 0) {
+    return type === "service" ? "A combinar" : "Gratuito";
+  }
+
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(normalizedPrice / 100);
+}
+
+function buildMarketplaceContactHref(item) {
+  if (item?.contactUrl) {
+    return item.contactUrl;
+  }
+
+  if (item?.sellerEmail) {
+    const subject = encodeURIComponent(`Interesse em ${item.title}`);
+    const body = encodeURIComponent(`Oi! Tenho interesse no anuncio "${item.title}" publicado na loja interna do DAGV.`);
+    return `mailto:${item.sellerEmail}?subject=${subject}&body=${body}`;
+  }
+
+  return "";
+}
+
+function getMarketplaceStatusLabel(item) {
+  if (item?.isDemo) {
+    return "Exemplo";
+  }
+
+  return item?.isActive ? "Ativo" : "Pausado";
+}
+
 function isAdminFeatureUnavailableError(error) {
   const code = String(error?.code || error?.error_code || "").toUpperCase();
   const message = String(error?.message || "").toLowerCase();
@@ -1598,6 +1951,17 @@ function isAdminFeatureUnavailableError(error) {
     || message.includes("admin_announcements")
     || message.includes("admin_users")
     || message.includes("user_preferences");
+}
+
+function isMarketplaceFeatureUnavailableError(error) {
+  const code = String(error?.code || error?.error_code || "").toUpperCase();
+  const message = String(error?.message || "").toLowerCase();
+
+  return code === "42P01"
+    || code === "PGRST205"
+    || message.includes("does not exist")
+    || message.includes("could not find the table")
+    || message.includes("marketplace_listings");
 }
 
 function resolveNotificationPermissionStatus() {
@@ -2125,6 +2489,7 @@ function renderRegistrationPendingState(registration) {
         <p class="section-copy">${escape(buildRegistrationBannerMessage(registration))}</p>
         <div class="button-row" style="margin-top: 1rem;">
           <button class="secondary" data-action="open-registration">Ir para cadastro</button>
+          <button class="ghost" data-action="set-main-tab" data-tab="${SUBSCRIPTION_TAB_ID}">Abrir loja</button>
         </div>
       </section>
       ${renderAnnouncementsFeed()}
@@ -2507,11 +2872,14 @@ function renderHomePanel(activeUpload) {
         ${renderHomeShortcut("calendar-day", "Hoje", "open-academic-tab", "today")}
         ${renderHomeShortcut("utensils", "RU", "open-academic-tab", "menu")}
         ${renderHomeShortcut("calendar-grid", "Semana", "open-academic-tab", "week")}
+        ${renderHomeShortcut("shopping-bag", "Loja", "set-main-tab", SUBSCRIPTION_TAB_ID)}
         ${INFO_HUB_VISIBLE ? renderHomeShortcut("compass", "Infos", "open-info-hub", "") : ""}
         ${renderHomeShortcut("user-plus", "Cadastro", "open-registration", "")}
         ${getRegistrationState().studentCardUpload ? renderHomeShortcut("id-card", "ID Digital", "open-student-card", "") : ""}
         ${state.isAdmin ? renderHomeShortcut("shield", "Admin", "open-admin", "") : ""}
       </section>
+
+      ${renderMarketplaceHomePanel()}
 
       ${renderNotificationPanel(activeUpload)}
 
@@ -2555,6 +2923,38 @@ function renderHomePanel(activeUpload) {
             : renderMissingPdfState("Importe o PDF do SCA para montar sua grade.")}
         </div>
       </section>
+    </section>
+  `;
+}
+
+function renderMarketplaceHomePanel() {
+  const items = getMarketplaceDisplayItems()
+    .filter((item) => item.isActive)
+    .slice(0, 3);
+
+  if (!items.length) {
+    return "";
+  }
+
+  const usingDemoData = isMarketplaceUsingDemoData(items);
+
+  return `
+    <section class="paper-card simple-section">
+      <div class="section-header-row">
+        <div>
+          <div class="section-topline">Loja interna</div>
+          <h2 class="section-title">Produtos, ingressos e servicos do curso</h2>
+        </div>
+        <button class="ghost" data-action="set-main-tab" data-tab="${SUBSCRIPTION_TAB_ID}">Abrir loja</button>
+      </div>
+      <p class="section-copy">
+        ${usingDemoData
+          ? "A loja ja esta pronta no app. Enquanto a tabela do Supabase nao recebe itens reais, estes cards mostram o formato final."
+          : "Um mural interno estilo marketplace para conectar vendas, ingressos e combinados entre estudantes."}
+      </p>
+      <div class="marketplace-grid marketplace-grid-compact" style="margin-top: 1rem;">
+        ${items.map(renderMarketplaceListingCard).join("")}
+      </div>
     </section>
   `;
 }
@@ -2796,47 +3196,216 @@ function renderPortalListItem(item, iconName = "badge-check") {
 }
 
 function renderExpansionLinksPanel() {
+  const items = getMarketplaceDisplayItems();
+  const visibleItems = getVisibleMarketplaceItems(items);
+  const activeItems = items.filter((item) => item.isActive);
+  const ticketItems = activeItems.filter((item) => item.type === "ticket");
+  const ownItems = items.filter((item) => item.isOwn);
+  const usingDemoData = isMarketplaceUsingDemoData(items);
+  const draft = state.marketplaceDraft || createEmptyMarketplaceDraft();
+
   return `
     <section class="section-stack simple-stack">
       <section class="paper-card dashboard-highlight simple-section">
         <div class="section-header-row">
           <div>
-            <div class="section-topline">Assinatura</div>
-            <h2 class="section-title">Planos, checkout e ligas</h2>
+            <div class="section-topline">Loja interna</div>
+            <h2 class="section-title">Marketplace para produtos, ingressos e servicos</h2>
           </div>
-          <span class="tag">Estrutura pronta</span>
+          <div class="button-row">
+            <button class="ghost" data-action="marketplace-refresh" ${state.marketplaceLoading ? "disabled" : ""}>${state.marketplaceLoading ? "Atualizando..." : "Atualizar"}</button>
+          </div>
         </div>
-        <p class="section-copy">Esta area agora fica separada da tela inicial e concentra o espaco de assinatura, pagamento unico e acessos extras do aplicativo.</p>
+        <p class="section-copy">Um mural interno estilo marketplace para publicar oportunidades reais entre alunos sem tirar o resto do app do lugar.</p>
+        <div class="metrics-grid" style="margin-top: 1rem;">
+          ${metric("Ativos", String(activeItems.length), "anuncios visiveis no mural")}
+          ${metric("Ingressos", String(ticketItems.length), "eventos e lotes publicados")}
+          ${metric("Meus anuncios", String(ownItems.length), "itens vinculados a sua conta")}
+          ${metric("Filtro atual", state.marketplaceFilterType === "all" ? "Tudo" : getMarketplaceTypeLabel(state.marketplaceFilterType), state.marketplaceOnlyMine ? "somente meus" : "todos os anunciantes")}
+        </div>
+        ${usingDemoData ? `<div class="toast is-warning" style="margin-top: 1rem;">A interface da loja ja esta pronta. Estes cards sao exemplos locais enquanto o Supabase ainda nao recebeu a nova tabela ou os primeiros anuncios.</div>` : ""}
+        ${state.marketplaceError ? `<div class="toast is-warning" style="margin-top: 1rem;">${escape(state.marketplaceError)}</div>` : ""}
       </section>
 
       <section class="paper-card simple-section">
         <div class="section-header-row">
           <div>
-            <div class="section-topline">Acessos</div>
-            <h2 class="section-title">Escolha uma opcao</h2>
+            <div class="section-topline">Descobrir</div>
+            <h2 class="section-title">Filtre o mural da comunidade</h2>
           </div>
-          <span class="tag">${EXPANSION_LINKS.length} itens</span>
+          <span class="tag">${String(visibleItems.length)} itens</span>
         </div>
-        <p class="section-copy">Mantive aqui os cards de Plano Plus, checkout e Ligas Academicas para voce acessar pela barra lateral.</p>
-        <div class="link-grid" style="margin-top: 1rem;">
-          ${EXPANSION_LINKS.map(renderExpansionLinkCard).join("")}
+        <div class="form-grid">
+          <div class="inline-field">
+            <label for="marketplaceSearchInput">Buscar na loja</label>
+            <input id="marketplaceSearchInput" type="text" value="${escapeAttribute(state.marketplaceFilterQuery || "")}" placeholder="Ex.: jaleco, ingresso, semiologia" />
+          </div>
+          <div class="segmented-control">
+            ${renderMarketplaceFilterButton("all", "Tudo")}
+            ${MARKETPLACE_LISTING_TYPES.map((item) => renderMarketplaceFilterButton(item.id, item.label)).join("")}
+          </div>
+          <label class="checkbox-field" for="marketplaceOnlyMine">
+            <input id="marketplaceOnlyMine" type="checkbox" ${state.marketplaceOnlyMine ? "checked" : ""} />
+            <span>Mostrar apenas meus anuncios</span>
+          </label>
+        </div>
+      </section>
+
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Publicar</div>
+            <h2 class="section-title">Criar novo anuncio</h2>
+          </div>
+          <span class="tag">${escape(getMarketplaceTypeLabel(draft.type))}</span>
+        </div>
+        <p class="section-copy">Publique um item da comunidade e deixe o contato pronto para a pessoa interessada falar com voce.</p>
+        <div class="admin-compose-grid" style="margin-top: 1rem;">
+          <div class="form-grid">
+            <div class="segmented-control">
+              ${MARKETPLACE_LISTING_TYPES.map((item) => renderMarketplaceDraftTypeButton(item.id, item.label)).join("")}
+            </div>
+            <div class="inline-field">
+              <label for="marketplaceDraftTitle">Titulo</label>
+              <input id="marketplaceDraftTitle" type="text" maxlength="90" value="${escapeAttribute(draft.title)}" placeholder="Ex.: Ingresso open bar da turma" />
+            </div>
+            <div class="inline-field">
+              <label for="marketplaceDraftDescription">Descricao</label>
+              <textarea id="marketplaceDraftDescription" rows="5" maxlength="500" placeholder="Explique o que esta sendo vendido, o estado do item e como entregar.">${escape(draft.description)}</textarea>
+            </div>
+            <div class="simple-meta-grid">
+              <div class="inline-field">
+                <label for="marketplaceDraftPrice">Preco</label>
+                <input id="marketplaceDraftPrice" type="number" min="0" step="0.01" inputmode="decimal" value="${escapeAttribute(draft.price)}" placeholder="0,00" />
+              </div>
+              <div class="inline-field">
+                <label for="marketplaceDraftLocation">Local ou entrega</label>
+                <input id="marketplaceDraftLocation" type="text" maxlength="80" value="${escapeAttribute(draft.location)}" placeholder="Ex.: Campus Centro ou transferencia digital" />
+              </div>
+            </div>
+            <div class="inline-field">
+              <label for="marketplaceDraftContactUrl">Link de contato opcional</label>
+              <input id="marketplaceDraftContactUrl" type="url" value="${escapeAttribute(draft.contactUrl)}" placeholder="https://wa.me/... ou formulario do evento" />
+            </div>
+            <div class="button-row">
+              <button class="secondary" data-action="save-marketplace-listing" ${state.marketplaceLoading || !state.marketplaceRemoteReady ? "disabled" : ""}>${state.marketplaceLoading ? "Salvando..." : "Publicar anuncio"}</button>
+              <button class="ghost" data-action="marketplace-refresh" ${state.marketplaceLoading ? "disabled" : ""}>Atualizar loja</button>
+            </div>
+            ${!state.marketplaceRemoteReady ? `<div class="support-line">A publicacao real fica liberada assim que o novo schema do Supabase for aplicado.</div>` : ""}
+          </div>
+          <aside class="announcement-preview-shell marketplace-preview-shell">
+            <div class="section-topline">Previa</div>
+            <h3 class="section-title">${escape(draft.title || "Seu anuncio vai aparecer assim")}</h3>
+            ${renderMarketplaceDraftPreview(draft)}
+          </aside>
+        </div>
+      </section>
+
+      <section class="paper-card simple-section">
+        <div class="section-header-row">
+          <div>
+            <div class="section-topline">Mural</div>
+            <h2 class="section-title">Anuncios publicados</h2>
+          </div>
+          <span class="tag">${state.marketplaceOnlyMine ? "somente meus" : "comunidade"} </span>
+        </div>
+        <div class="marketplace-grid" style="margin-top: 1rem;">
+          ${visibleItems.length
+            ? visibleItems.map(renderMarketplaceListingCard).join("")
+            : `<div class="empty-state">Nenhum anuncio combinou com o filtro atual. Tente outro termo ou publique o primeiro item.</div>`}
         </div>
       </section>
     </section>
   `;
 }
 
-function renderExpansionLinkCard(item) {
+function renderMarketplaceFilterButton(type, label) {
   return `
-    <article class="paper-card feature-card link-card">
-      <div class="link-card-top">
-        <span class="tag">${escape(item.badge)}</span>
+    <button class="segmented-button compact-segment ${state.marketplaceFilterType === type ? "is-active" : ""}" data-action="set-marketplace-type-filter" data-filter-type="${escapeAttribute(type)}">
+      ${escape(label)}
+    </button>
+  `;
+}
+
+function renderMarketplaceDraftTypeButton(type, label) {
+  const draft = state.marketplaceDraft || createEmptyMarketplaceDraft();
+  return `
+    <button class="segmented-button compact-segment ${draft.type === type ? "is-active" : ""}" data-action="set-marketplace-draft-type" data-marketplace-type="${escapeAttribute(type)}">
+      ${escape(label)}
+    </button>
+  `;
+}
+
+function renderMarketplaceDraftPreview(draft) {
+  const previewItem = normalizeMarketplaceRow({
+    id: "preview-marketplace",
+    type: draft.type,
+    title: draft.title || "Titulo do anuncio",
+    description: draft.description || "Descreva aqui o que esta sendo vendido, como entregar e qualquer detalhe importante para o comprador.",
+    price_cents: parseMarketplacePriceToCents(draft.price),
+    location_label: draft.location || "Local a combinar",
+    contact_url: normalizeOptionalHttpUrl(draft.contactUrl || ""),
+    seller_display_name: state.user?.displayName || "Aluno",
+    seller_email: state.user?.email || "",
+    is_active: true,
+    is_demo: true,
+  }, state.user?.uid || "");
+
+  return `
+    <div class="marketplace-preview-card">
+      ${renderMarketplaceListingCard(previewItem, { preview: true })}
+      <div class="simple-list" style="margin-top: 1rem;">
+        ${renderSimpleInfoRow("Tipo", getMarketplaceTypeLabel(draft.type))}
+        ${renderSimpleInfoRow("Contato", normalizeOptionalHttpUrl(draft.contactUrl || "") ? "Link personalizado" : (state.user?.email || "email da conta"))}
       </div>
-      <div>
-        <h3 class="schedule-title">${escape(item.title)}</h3>
-        <p class="section-copy">${escape(item.description)}</p>
+    </div>
+  `;
+}
+
+function renderMarketplaceListingCard(item, options = {}) {
+  const contactHref = buildMarketplaceContactHref(item);
+  const isPreview = Boolean(options.preview);
+  const cardClasses = [
+    "paper-card",
+    "feature-card",
+    "marketplace-card",
+    `is-${normalizeMarketplaceType(item.type)}`,
+    item.isActive ? "is-active" : "is-paused",
+    item.isOwn ? "is-own" : "",
+    item.isDemo ? "is-demo" : "",
+  ].filter(Boolean);
+
+  return `
+    <article class="${cardClasses.join(" ")}">
+      <div class="marketplace-card-top">
+        <div class="announcement-title-wrap">
+          <span class="announcement-mark">${renderUiIcon(getMarketplaceTypeIcon(item.type), "announcement-mark-icon")}</span>
+          <div>
+            <div class="marketplace-meta-row">
+              <span class="tag">${escape(getMarketplaceTypeLabel(item.type))}</span>
+              <span class="tag">${escape(getMarketplaceStatusLabel(item))}</span>
+              ${item.isOwn ? `<span class="tag">Seu anuncio</span>` : ""}
+            </div>
+            <h3 class="schedule-title">${escape(item.title)}</h3>
+          </div>
+        </div>
+        <strong class="marketplace-price">${escape(formatMarketplacePrice(item.priceCents, item.type))}</strong>
       </div>
-      <span class="link-hint">${escape(item.hint)}</span>
+      <p class="section-copy marketplace-description">${escape(item.description || "Sem descricao informada.")}</p>
+      <div class="marketplace-info-list">
+        ${item.location ? `<span class="tag">${escape(item.location)}</span>` : ""}
+        ${item.sellerName ? `<span class="tag">${escape(item.sellerName)}</span>` : ""}
+        ${item.createdAt ? `<span class="tag">${escape(formatShortDateTime(item.createdAt))}</span>` : ""}
+      </div>
+      <div class="button-row" style="margin-top: 0.9rem;">
+        ${item.isDemo || isPreview
+          ? `<span class="tag">${item.isDemo && !isPreview ? "Exemplo local" : "Previa"}</span>`
+          : contactHref
+            ? `<a class="ghost link-button" href="${escapeAttribute(contactHref)}" target="${contactHref.startsWith("mailto:") ? "_self" : "_blank"}" rel="noreferrer">${escape(getMarketplaceTypeCta(item.type))}</a>`
+            : `<span class="tag">Contato pela conta</span>`}
+        ${item.isOwn && !item.isDemo && !isPreview ? `<button class="ghost" data-action="toggle-marketplace-listing" data-listing-id="${escapeAttribute(item.id)}">${item.isActive ? "Pausar" : "Reativar"}</button>` : ""}
+        ${item.isOwn && !item.isDemo && !isPreview ? `<button class="ghost" data-action="delete-marketplace-listing" data-listing-id="${escapeAttribute(item.id)}">Excluir</button>` : ""}
+      </div>
     </article>
   `;
 }
@@ -3266,6 +3835,20 @@ function renderUiIcon(iconName, className = "ui-icon") {
       <path d="m18.5 13 .6 1.8 1.9.7-1.9.6-.6 1.9-.7-1.9-1.8-.6 1.8-.7Z"></path>
       <path d="m5.5 14 .8 2.3 2.2.8-2.2.7-.8 2.2-.8-2.2-2.2-.7 2.2-.8Z"></path>
     `,
+    "shopping-bag": `
+      <path d="M6 8h12l-1 11H7L6 8Z"></path>
+      <path d="M9 8a3 3 0 0 1 6 0"></path>
+    `,
+    ticket: `
+      <path d="M4 9.5A2.5 2.5 0 0 0 6.5 7H18a2 2 0 0 1 2 2v2a2.5 2.5 0 0 0 0 5v2a2 2 0 0 1-2 2H6.5A2.5 2.5 0 0 0 4 17.5Z"></path>
+      <path d="M10 9.5v5"></path>
+      <path d="M14 9.5v5"></path>
+    `,
+    briefcase: `
+      <rect x="3.5" y="7.5" width="17" height="11" rx="2.2"></rect>
+      <path d="M9 7.5V6a1.5 1.5 0 0 1 1.5-1.5h3A1.5 1.5 0 0 1 15 6v1.5"></path>
+      <path d="M3.5 12.5h17"></path>
+    `,
     confetti: `
       <path d="M5 19c4-5 8-8 14-11"></path>
       <path d="m12 5 2 4"></path>
@@ -3366,7 +3949,7 @@ function getScreenTitle() {
   }
 
   if (state.activeTab === SUBSCRIPTION_TAB_ID) {
-    return "Assinatura";
+    return "Loja";
   }
 
   if (state.activeTab === "academic") {
@@ -3381,7 +3964,7 @@ function getScreenTitle() {
   const mainTitleMap = {
     home: "Início",
     [ADMIN_TAB_ID]: "Admin",
-    [SUBSCRIPTION_TAB_ID]: "Assinatura",
+    [SUBSCRIPTION_TAB_ID]: "Loja",
   };
 
   return mainTitleMap[state.activeTab] || APP_NAME;
@@ -3678,6 +4261,11 @@ async function onClick(event) {
     return;
   }
 
+  if (action === "marketplace-refresh") {
+    void refreshMarketplaceListings(false);
+    return;
+  }
+
   if (action === "enable-notifications") {
     void enableAppNotifications();
     return;
@@ -3743,6 +4331,40 @@ async function onClick(event) {
     return;
   }
 
+  if (action === "set-marketplace-type-filter") {
+    setState({
+      marketplaceFilterType: normalizeMarketplaceFilterType(button.dataset.filterType || "all"),
+    });
+    return;
+  }
+
+  if (action === "set-marketplace-draft-type") {
+    setState({
+      marketplaceDraft: {
+        ...(state.marketplaceDraft || createEmptyMarketplaceDraft()),
+        type: normalizeMarketplaceType(button.dataset.marketplaceType || ""),
+      },
+      marketplaceError: "",
+      uploadError: "",
+    });
+    return;
+  }
+
+  if (action === "save-marketplace-listing") {
+    void saveMarketplaceListing();
+    return;
+  }
+
+  if (action === "toggle-marketplace-listing") {
+    void toggleMarketplaceListingActive(button.dataset.listingId || "");
+    return;
+  }
+
+  if (action === "delete-marketplace-listing") {
+    void deleteMarketplaceListing(button.dataset.listingId || "");
+    return;
+  }
+
   if (action === "set-admin-category") {
     setState({
       adminDraft: {
@@ -3786,6 +4408,18 @@ function onInput(event) {
 
   if (String(event.target.id || "").startsWith("adminDraft")) {
     updateAdminDraftFromEvent(event.target);
+    return;
+  }
+
+  if (String(event.target.id || "").startsWith("marketplaceDraft")) {
+    updateMarketplaceDraftFromEvent(event.target);
+    return;
+  }
+
+  if (event.target.id === "marketplaceSearchInput") {
+    setState({
+      marketplaceFilterQuery: String(event.target.value || ""),
+    }, { render: false });
   }
 }
 
@@ -3797,6 +4431,18 @@ function onChange(event) {
 
   if (event.target.id === "schedulePdfInput" && event.target.files && event.target.files[0]) {
     uploadDocument(event.target.files[0], event.target, DOCUMENT_TYPES.schedule);
+    return;
+  }
+
+  if (event.target.id === "marketplaceOnlyMine") {
+    setState({
+      marketplaceOnlyMine: Boolean(event.target.checked),
+    });
+    return;
+  }
+
+  if (String(event.target.id || "").startsWith("marketplaceDraft")) {
+    updateMarketplaceDraftFromEvent(event.target);
     return;
   }
 
@@ -3829,6 +4475,14 @@ async function logout() {
       adminRole: "",
       adminStats: createEmptyAdminStats(),
       adminDraft: createEmptyAdminDraft(),
+      marketplaceItems: [],
+      marketplaceLoading: false,
+      marketplaceError: "",
+      marketplaceRemoteReady: false,
+      marketplaceDraft: createEmptyMarketplaceDraft(),
+      marketplaceFilterType: "all",
+      marketplaceFilterQuery: "",
+      marketplaceOnlyMine: false,
       offlineAccess: false,
       syncMessage: state.isOnline
         ? "Sessão encerrada. Entre novamente para acessar seus PDFs."
@@ -3857,6 +4511,14 @@ async function logout() {
       agendaTab: "today",
       sidebarOpen: false,
       documentViewer: createEmptyDocumentViewerState(),
+      marketplaceItems: [],
+      marketplaceLoading: false,
+      marketplaceError: "",
+      marketplaceRemoteReady: false,
+      marketplaceDraft: createEmptyMarketplaceDraft(),
+      marketplaceFilterType: "all",
+      marketplaceFilterQuery: "",
+      marketplaceOnlyMine: false,
       syncMessage: "Sessão encerrada. Entre novamente para acessar seus PDFs.",
     });
   } catch (error) {
@@ -4224,6 +4886,231 @@ function updateAdminDraftFromEvent(target) {
     adminError: "",
     uploadError: "",
   }, { render: false });
+}
+
+function updateMarketplaceDraftFromEvent(target) {
+  const draft = state.marketplaceDraft || createEmptyMarketplaceDraft();
+  const nextDraft = { ...draft };
+  const targetId = String(target?.id || "");
+
+  if (targetId === "marketplaceDraftTitle") {
+    nextDraft.title = String(target.value || "");
+  } else if (targetId === "marketplaceDraftDescription") {
+    nextDraft.description = String(target.value || "");
+  } else if (targetId === "marketplaceDraftPrice") {
+    nextDraft.price = String(target.value || "");
+  } else if (targetId === "marketplaceDraftLocation") {
+    nextDraft.location = String(target.value || "");
+  } else if (targetId === "marketplaceDraftContactUrl") {
+    nextDraft.contactUrl = String(target.value || "");
+  }
+
+  setState({
+    marketplaceDraft: nextDraft,
+    marketplaceError: "",
+    uploadError: "",
+  }, { render: false });
+}
+
+async function saveMarketplaceListing() {
+  if (!state.user || !services.supabase) {
+    setState({
+      marketplaceError: "Entre com Google antes de publicar na loja.",
+      uploadError: "",
+      uploadMessage: "",
+    });
+    return;
+  }
+
+  if (!state.marketplaceRemoteReady) {
+    setState({
+      marketplaceError: "A publicacao real fica liberada assim que o novo schema do Supabase for aplicado.",
+      uploadError: "",
+      uploadMessage: "",
+    });
+    return;
+  }
+
+  const payload = buildMarketplaceListingPayload(state.marketplaceDraft);
+  if (!payload.ok) {
+    setState({
+      marketplaceError: payload.message,
+      uploadError: "",
+      uploadMessage: "",
+    });
+    return;
+  }
+
+  setState({
+    marketplaceLoading: true,
+    marketplaceError: "",
+    uploadError: "",
+    uploadMessage: "Publicando anuncio na loja interna...",
+  });
+
+  try {
+    const now = new Date().toISOString();
+    const { error } = await services.supabase
+      .from("marketplace_listings")
+      .insert({
+        owner_uid: state.user.uid,
+        type: payload.value.type,
+        title: payload.value.title,
+        description: payload.value.description,
+        price_cents: payload.value.priceCents,
+        location_label: payload.value.location,
+        contact_url: payload.value.contactUrl,
+        seller_display_name: state.user.displayName || state.profile?.displayName || "Aluno",
+        seller_email: state.user.email || state.profile?.email || "",
+        is_active: true,
+        updated_at: now,
+      });
+
+    if (error) {
+      throw error;
+    }
+
+    await refreshMarketplaceListings(true);
+    setState({
+      marketplaceDraft: createEmptyMarketplaceDraft(),
+      marketplaceLoading: false,
+      marketplaceError: "",
+      uploadError: "",
+      uploadMessage: "Anuncio publicado com sucesso na loja interna.",
+    });
+  } catch (error) {
+    setState({
+      marketplaceLoading: false,
+      marketplaceError: `Nao consegui publicar este anuncio: ${describeSupabaseError(error)}`,
+      uploadMessage: "",
+    });
+  }
+}
+
+async function toggleMarketplaceListingActive(listingId) {
+  if (!state.user || !services.supabase || !listingId) {
+    return;
+  }
+
+  const current = getMarketplaceDisplayItems().find((item) => item.id === listingId);
+  if (!current || (!current.isOwn && !state.isAdmin) || current.isDemo) {
+    return;
+  }
+
+  setState({
+    marketplaceLoading: true,
+    marketplaceError: "",
+    uploadError: "",
+    uploadMessage: current.isActive ? "Pausando anuncio..." : "Reativando anuncio...",
+  }, { render: false });
+
+  try {
+    const { error } = await services.supabase
+      .from("marketplace_listings")
+      .update({
+        is_active: !current.isActive,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", listingId);
+
+    if (error) {
+      throw error;
+    }
+
+    await refreshMarketplaceListings(true);
+    setState({
+      marketplaceLoading: false,
+      marketplaceError: "",
+      uploadError: "",
+      uploadMessage: current.isActive ? "Anuncio pausado com sucesso." : "Anuncio reativado com sucesso.",
+    });
+  } catch (error) {
+    setState({
+      marketplaceLoading: false,
+      marketplaceError: `Nao consegui atualizar este anuncio: ${describeSupabaseError(error)}`,
+      uploadMessage: "",
+    });
+  }
+}
+
+async function deleteMarketplaceListing(listingId) {
+  if (!state.user || !services.supabase || !listingId) {
+    return;
+  }
+
+  const current = getMarketplaceDisplayItems().find((item) => item.id === listingId);
+  if (!current || (!current.isOwn && !state.isAdmin) || current.isDemo) {
+    return;
+  }
+
+  setState({
+    marketplaceLoading: true,
+    marketplaceError: "",
+    uploadError: "",
+    uploadMessage: "Removendo anuncio da loja...",
+  }, { render: false });
+
+  try {
+    const { error } = await services.supabase
+      .from("marketplace_listings")
+      .delete()
+      .eq("id", listingId);
+
+    if (error) {
+      throw error;
+    }
+
+    await refreshMarketplaceListings(true);
+    setState({
+      marketplaceLoading: false,
+      marketplaceError: "",
+      uploadError: "",
+      uploadMessage: "Anuncio removido com sucesso.",
+    });
+  } catch (error) {
+    setState({
+      marketplaceLoading: false,
+      marketplaceError: `Nao consegui excluir este anuncio: ${describeSupabaseError(error)}`,
+      uploadMessage: "",
+    });
+  }
+}
+
+function buildMarketplaceListingPayload(draft) {
+  const type = normalizeMarketplaceType(draft?.type);
+  const title = String(draft?.title || "").trim();
+  const description = String(draft?.description || "").trim();
+  const location = String(draft?.location || "").trim();
+  const contactUrl = normalizeOptionalHttpUrl(draft?.contactUrl || "");
+  const priceCents = parseMarketplacePriceToCents(draft?.price || "");
+
+  if (!title) {
+    return { ok: false, message: "Escolha um titulo para o anuncio." };
+  }
+
+  if (description.length < 12) {
+    return { ok: false, message: "Descreva melhor o item para a loja, com pelo menos 12 caracteres." };
+  }
+
+  if (priceCents < 0) {
+    return { ok: false, message: "Informe um preco valido para o anuncio." };
+  }
+
+  if (String(draft?.contactUrl || "").trim() && !contactUrl) {
+    return { ok: false, message: "Use um link HTTPS valido no campo de contato ou deixe em branco." };
+  }
+
+  return {
+    ok: true,
+    value: {
+      type,
+      title,
+      description,
+      priceCents,
+      location,
+      contactUrl,
+    },
+  };
 }
 
 async function saveAdminAnnouncement() {
@@ -5500,6 +6387,10 @@ function persistUiState() {
       lastMenuSync: state.lastMenuSync,
       syncMessage: state.syncMessage,
       announcements: state.announcements,
+      marketplaceItems: state.marketplaceItems,
+      marketplaceFilterType: state.marketplaceFilterType,
+      marketplaceFilterQuery: state.marketplaceFilterQuery,
+      marketplaceOnlyMine: state.marketplaceOnlyMine,
     }),
   );
 }
